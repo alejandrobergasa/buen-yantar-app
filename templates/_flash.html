@@ -1,0 +1,9 @@
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flash" role="status" aria-live="polite" aria-atomic="true">
+      {% for m in messages %}
+        <div class="flash-item">{{ m }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "Sociedad" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1f4b44">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-wrap">
+        <a class="brand" href="{{ url_for('home') }}">Sociedad gastronómica</a>
+        <span class="brand-sub">Gestión clara y sencilla</span>
+      </div>
+
+      {% if session.get("user") %}
+      <nav class="top-actions" aria-label="Navegación principal">
+        <span class="user-badge">Usuario: {{ session.get("user") }}</span>
+        <a class="link" href="{{ url_for('home') }}">Inicio</a>
+        <a class="link" href="{{ url_for('logout') }}">Salir</a>
+      </nav>
+      {% endif %}
+    </div>
+  </header>
+
+  <main id="mainContent" class="container">
+    {% include "_flash.html" %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

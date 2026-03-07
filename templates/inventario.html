@@ -1,0 +1,703 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel page-intro">
+  <h1 class="page-title page-title-left">📦 Inventario</h1>
+  <p class="lead">Busca un producto, consulta su stock y edítalo sin salir de esta pantalla.</p>
+  <div class="flow-steps">
+    <span class="step-chip">1. Filtra en el listado</span>
+    <span class="step-chip">2. Selecciona un producto</span>
+    <span class="step-chip">3. Edita y guarda cambios</span>
+  </div>
+</section>
+
+<div class="inv-page inv-compact">
+
+  <div class="inv-grid">
+    <!-- COLUMNA 1: LISTADO -->
+    <section class="inv-col">
+      <div class="panel inv-panel">
+        <h2 class="panel-title">🧺 Listado de productos</h2>
+
+        <!-- Filtros: 2 columnas en la misma fila -->
+        <div class="inv-filters">
+          <div>
+            <label class="label">🔎 Buscar</label>
+            <input id="searchBox" class="input" placeholder="Escribe nombre del producto">
+          </div>
+
+          <div class="inv-filters-right">
+            <label class="label">🧩 Grupo</label>
+            <select id="groupFilter">
+              <option value="">(Todos)</option>
+              {% for g, e in group_options %}
+                <option value="{{ g }}">{{ e }} {{ g }}</option>
+              {% endfor %}
+            </select>
+
+            <label class="inv-check">
+              <input id="onlyLow" type="checkbox">
+              <span>⚠️ Solo bajo reserva</span>
+            </label>
+          </div>
+        </div>
+        <p class="help">Puedes filtrar por nombre, por grupo o mostrar solo artículos con stock bajo.</p>
+
+        <!-- Lista con scroll interno -->
+        <div class="inv-scrollbox" id="listBox">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th class="right">Stock</th>
+              </tr>
+            </thead>
+            <tbody id="productsTbody">
+              {% for r in products_table %}
+                <tr
+                  class="row-click {% if selected and selected.producto_id == r.producto_id %}row-selected{% endif %}"
+                  data-href="{{ url_for('inventario', producto_id=r.producto_id) }}"
+                  data-name="{{ r.nombre }}"
+                  data-group="{{ r.grupo }}"
+                  data-low="{{ r.bajo_minimo }}"
+                  data-inf="{{ r.stock_infinito }}"
+                  tabindex="0"
+                  role="button"
+                  aria-label="Abrir detalle de {{ r.nombre }}"
+                  style="cursor:pointer;"
+                >
+                  <td>
+                    <div class="product-row-head">
+                      <span class="product-name">{{ r.grupo_emoji }} {{ r.nombre }}</span>
+                      {% if r.stock_infinito == "1" %}
+                        <span class="product-state state-inf">♾️</span>
+                      {% elif r.total == 0 %}
+                        <span class="product-state state-zero">🔴</span>
+                      {% elif r.total < (r.stock_minimo | float) %}
+                        <span class="product-state state-low">⚠️</span>
+                      {% else %}
+                        <span class="product-state state-ok">✅</span>
+                      {% endif %}
+                    </div>
+                    <div class="help">{{ r.grupo_emoji }} {{ r.grupo }}</div>
+                  </td>
+
+                  <td class="right">
+                    {% if r.stock_infinito == "1" %}
+                      ♾️
+                    {% else %}
+                      {% if (r.total % 1) == 0 %}
+                        {{ "%.0f"|format(r.total) }} {{ r.unidad }}
+                      {% else %}
+                        {{ "%.2f"|format(r.total) }} {{ r.unidad }}
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Botón crear nuevo producto -->
+        <div style="margin-top:0.6rem;">
+          <button class="btn btn-primary" type="button" onclick="toggleNewProduct(true)">➕ Nuevo producto</button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- COLUMNA 2: DETALLE -->
+    <section class="inv-col">
+      <div class="panel inv-panel">
+        <h2 class="panel-title" id="detailTitle">🔎 Detalle</h2>
+
+        <div class="inv-detail-scroll">
+          <div id="newProductMiddleBox" class="inv-newbox" style="display:none;">
+            <h3 style="text-align:center; margin:0 0 0.5rem; font-size:1.05rem; font-weight:950;">➕ Crear producto</h3>
+
+            <form method="post" action="{{ url_for('inventario_nuevo_producto') }}" class="form" id="newProdForm">
+              <input type="hidden" name="f_q" value="{{ current_filters.q }}">
+              <input type="hidden" name="f_g" value="{{ current_filters.g }}">
+              <input type="hidden" name="f_low" value="{{ current_filters.low }}">
+              <label class="label">📌 Nombre</label>
+              <input class="input js-live-field" name="nombre" data-rule="required" required>
+
+              <div class="grid-2">
+                <div>
+                  <label class="label">💶 Precio / unidad</label>
+                  <input class="input js-live-field" name="precio_unitario" data-rule="number" placeholder="Ej: 1.20">
+                </div>
+                <div>
+                  <label class="label">📏 Unidad</label>
+                  <input class="input js-live-field" name="unidad" data-rule="required" value="ud" placeholder="ud / kg / l">
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div>
+                  <label class="label">🛟 Mínimo reserva</label>
+                  <input class="input js-live-field" name="stock_minimo" data-rule="number" value="0">
+                </div>
+                <div>
+                  <label class="label">📦 Stock actual</label>
+                  <input class="input js-live-field" name="stock_actual" data-rule="required-number-when-finite" placeholder="Ej: 20">
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div>
+                  <label class="label">🧩 Grupo</label>
+                  <select class="input js-live-field" name="grupo_select" id="grupoSelect" data-rule="required">
+                    {% for g, e in group_options %}
+                      <option value="{{ g }}" data-emoji="{{ e }}">{{ e }} {{ g }}</option>
+                    {% endfor %}
+                    <option value="__new__">➕ Nuevo grupo…</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Campos para grupo nuevo (ocultos por defecto) -->
+              <div id="newGroupFields" style="display:none;">
+                <div class="grid-2">
+                  <div>
+                    <label class="label">🧩 Nombre grupo (nuevo)</label>
+                    <input class="input js-live-field" name="grupo_custom" data-rule="required-when-new-group" placeholder="Ej: Verduras">
+                  </div>
+                  <div>
+                    <label class="label">😀 Emoji grupo (nuevo)</label>
+                    <input class="input js-live-field" name="grupo_emoji_custom" data-rule="required-when-new-group" placeholder="Ej: 🥬">
+                  </div>
+                </div>
+                <div class="help">Si eliges “Nuevo grupo…”, rellena estos dos campos.</div>
+              </div>
+
+              <label class="inv-check">
+                <input type="checkbox" name="stock_infinito">
+                <span>♾️ Stock infinito (no depende de stock)</span>
+              </label>
+
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">✅ Crear</button>
+                <button class="btn btn-secondary" type="button" onclick="toggleNewProduct(false)">↩️ Cancelar</button>
+              </div>
+            </form>
+          </div>
+
+          <div id="productDetailBox">
+            {% if not selected %}
+              <div class="empty">Selecciona un producto del listado para ver su información completa.</div>
+            {% else %}
+              {% set is_inf = (selected.stock_infinito == "1") %}
+              {% set minv = (selected.stock_minimo | float) %}
+              {% set st = (selected_stock | float) if selected_stock is not none else 0 %}
+
+              <div class="detail-split">
+                <div class="detail-main">
+                  <form method="post" action="{{ url_for('inventario_editar') }}" class="form">
+                    <input type="hidden" name="producto_id" value="{{ selected.producto_id }}">
+                    <input type="hidden" name="f_q" value="{{ current_filters.q }}">
+                    <input type="hidden" name="f_g" value="{{ current_filters.g }}">
+                    <input type="hidden" name="f_low" value="{{ current_filters.low }}">
+                    <div class="grid-2">
+                      <div>
+                        <label class="label">📌 Nombre</label>
+                        <input class="input js-detail-input" name="nombre" value="{{ selected.nombre }}" disabled required>
+                      </div>
+                      <div>
+                        <label class="label">🧩 Grupo</label>
+                        <div class="input-prefix-wrap">
+                          <span class="input-prefix">{{ selected.grupo_emoji }}</span>
+                          <input class="input input-prefixed js-detail-input" name="grupo" value="{{ selected.grupo }}" disabled>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="grid-2">
+                      <div>
+                        <label class="label">📦 Stock actual</label>
+                        {% if is_inf %}
+                          <input
+                            class="input input-num input-na js-detail-input js-stock-current"
+                            name="stock_actual"
+                            value="No aplica"
+                            disabled
+                          >
+                        {% else %}
+                          {% if st >= minv %}
+                            <input
+                              class="input input-num js-detail-input js-stock-current stock-current-ok"
+                              name="stock_actual"
+                              value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}"
+                              disabled
+                            >
+                          {% else %}
+                            <input
+                              class="input input-num js-detail-input js-stock-current stock-current-low"
+                              name="stock_actual"
+                              value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}"
+                              disabled
+                            >
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                      <div>
+                        <label class="label">🛟 Stock reserva</label>
+                        {% if is_inf %}
+                          <input
+                            class="input input-num input-na js-detail-input js-stock-min"
+                            name="stock_minimo"
+                            value="No aplica"
+                            data-real="{{ selected.stock_minimo }}"
+                            disabled
+                          >
+                        {% else %}
+                          <input
+                            class="input input-num js-detail-input js-stock-min"
+                            name="stock_minimo"
+                            value="{{ selected.stock_minimo }}"
+                            data-real="{{ selected.stock_minimo }}"
+                            disabled
+                          >
+                        {% endif %}
+                      </div>
+                    </div>
+
+                    <div class="grid-2">
+                      <div>
+                        <label class="label">📏 Unidad</label>
+                        <input class="input js-detail-input" name="unidad" value="{{ selected.unidad }}" disabled>
+                      </div>
+                      <div>
+                        <label class="label">💶 Precio / unidad</label>
+                        <input class="input input-num js-detail-input js-eur-input" name="precio_unitario" value="{{ selected.precio_unitario }}" disabled>
+                      </div>
+                    </div>
+
+                    <input type="hidden" name="grupo_emoji" value="{{ selected.grupo_emoji }}">
+
+                    <label class="inv-check">
+                      <input type="checkbox" class="js-detail-input js-stock-inf-detail" name="stock_infinito" {% if is_inf %}checked{% endif %} disabled>
+                      <span>♾️ Stock infinito</span>
+                    </label>
+
+                    <div class="actions" id="detailActionsView">
+                      <button class="btn btn-primary" type="button" id="btnEditDetail">✏️ Editar producto</button>
+                    </div>
+
+                    <div class="actions" id="detailActionsEdit" style="display:none;">
+                      <button class="btn btn-primary" type="submit">💾 Guardar cambios</button>
+                      <button class="btn btn-secondary" type="button" id="btnCancelDetail">↩️ Cancelar cambios</button>
+                      <button
+                        id="btnDeleteDetail"
+                        class="btn btn-secondary"
+                        type="submit"
+                        formaction="{{ url_for('inventario_eliminar') }}"
+                        formmethod="post"
+                        onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
+                      >
+                        🗑️ Eliminar producto
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <aside class="detail-side">
+                  <h3 class="panel-title detail-side-title">🧾 Historial compras</h3>
+                  <div class="inv-scrollbox detail-history-box">
+                    {% if not selected_purchases %}
+                      <div class="empty">No hay compras registradas.</div>
+                    {% else %}
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th class="right">Cantidad</th>
+                            <th>Nota</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for m in selected_purchases %}
+                            <tr>
+                              <td>{{ (m.fecha or '')[:10] }}</td>
+                              <td class="right">{{ m.cantidad }}</td>
+                              <td>{{ m.nota }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    {% endif %}
+                  </div>
+                </aside>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+  // --- Normaliza texto (tildes/espacios/mayúsculas) ---
+  function normalizeText(s) {
+    return (s || "")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+  }
+
+  // --- Mostrar/ocultar nuevo producto ---
+  function toggleNewProduct(show){
+    const box = document.getElementById("newProductMiddleBox");
+    const detailBox = document.getElementById("productDetailBox");
+    const detailTitle = document.getElementById("detailTitle");
+
+    box.style.display = show ? "block" : "none";
+    detailBox.style.display = show ? "none" : "block";
+    detailTitle.textContent = show ? "➕ Nuevo producto" : "🔎 Detalle";
+  }
+
+  // --- Filtros en vivo ---
+  const searchBox = document.getElementById("searchBox");
+  const groupFilter = document.getElementById("groupFilter");
+  const onlyLow = document.getElementById("onlyLow");
+  const rows = Array.from(document.querySelectorAll("#productsTbody tr"));
+  const urlParams = new URLSearchParams(window.location.search);
+
+  if(urlParams.has("q")){
+    searchBox.value = urlParams.get("q") || "";
+  }
+  if(urlParams.has("g")){
+    groupFilter.value = urlParams.get("g") || "";
+  }
+  if(urlParams.get("low") === "1"){
+    onlyLow.checked = true;
+  }
+
+  // --- Clic en toda la fila (preserva filtros actuales) ---
+  function navigateToProductRow(tr){
+    const base = tr.getAttribute("data-href");
+    const next = new URL(base, window.location.origin);
+
+    const q = (searchBox.value || "").trim();
+    const g = (groupFilter.value || "").trim();
+    const low = !!onlyLow.checked;
+
+    if(q){ next.searchParams.set("q", q); }
+    else { next.searchParams.delete("q"); }
+    if(g){ next.searchParams.set("g", g); }
+    else { next.searchParams.delete("g"); }
+    if(low){ next.searchParams.set("low", "1"); }
+    else { next.searchParams.delete("low"); }
+
+    window.location.href = next.pathname + next.search;
+  }
+
+  document.querySelectorAll("tr[data-href]").forEach(tr => {
+    tr.addEventListener("click", () => navigateToProductRow(tr));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        navigateToProductRow(tr);
+      }
+    });
+  });
+
+  function applyFilters() {
+    const q = normalizeText(searchBox.value);
+    const g = (groupFilter.value || "").trim();
+    const lowOnly = !!onlyLow.checked;
+
+    rows.forEach(tr => {
+      const name = normalizeText(tr.getAttribute("data-name"));
+      const group = (tr.getAttribute("data-group") || "").trim();
+      const low = (tr.getAttribute("data-low") || "0") === "1";
+
+      const okText = (q === "") || name.includes(q);
+      const okGroup = (g === "") || (group === g);
+      const okLow = (!lowOnly) || low;
+
+      tr.style.display = (okText && okGroup && okLow) ? "" : "none";
+    });
+  }
+
+  searchBox.addEventListener("input", applyFilters);
+  groupFilter.addEventListener("change", applyFilters);
+  onlyLow.addEventListener("change", applyFilters);
+  applyFilters();
+
+  // --- Alta: grupo existente vs nuevo grupo ---
+  const grupoSelect = document.getElementById("grupoSelect");
+  const newGroupFields = document.getElementById("newGroupFields");
+  const stockInfinitoCheckbox = document.querySelector('#newProdForm input[name="stock_infinito"]');
+  const stockActualInput = document.querySelector('#newProdForm input[name="stock_actual"]');
+
+  function syncGroupUI(){
+    const val = grupoSelect.value;
+
+    if(val === "__new__"){
+      newGroupFields.style.display = "block";
+    } else {
+      newGroupFields.style.display = "none";
+    }
+  }
+
+  grupoSelect.addEventListener("change", syncGroupUI);
+  syncGroupUI();
+
+  function syncStockActualUI(){
+    const isInfinite = !!stockInfinitoCheckbox.checked;
+    stockActualInput.disabled = isInfinite;
+    if(isInfinite){
+      stockActualInput.value = "";
+    }
+  }
+
+  stockInfinitoCheckbox.addEventListener("change", () => {
+    syncStockActualUI();
+    refreshValidation();
+  });
+  syncStockActualUI();
+
+  // --- Validación visual en vivo del alta ---
+  const newProdForm = document.getElementById("newProdForm");
+  const liveFields = Array.from(newProdForm.querySelectorAll(".js-live-field"));
+
+  function setFieldState(el, state){
+    el.classList.remove("field-pending", "field-valid", "field-invalid");
+    el.classList.add(state);
+  }
+
+  function parseNumber(raw){
+    let t = (raw || "").trim().replace(/\s/g, "");
+    if (t === "") return null;
+    if (t.includes(",") && t.includes(".")) {
+      if (t.lastIndexOf(",") > t.lastIndexOf(".")) {
+        t = t.replace(/\./g, "").replace(",", ".");
+      } else {
+        t = t.replace(/,/g, "");
+      }
+    } else {
+      t = t.replace(",", ".");
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function validateField(el){
+    const rule = el.dataset.rule || "required";
+    const val = (el.value || "").trim();
+    const isNewGroup = grupoSelect.value === "__new__";
+    const isInfinite = !!stockInfinitoCheckbox.checked;
+
+    if(rule === "required"){
+      if(val === "") return "field-pending";
+      return "field-valid";
+    }
+
+    if(rule === "number"){
+      if(val === "") return "field-pending";
+      const n = parseNumber(val);
+      if(Number.isNaN(n) || n < 0) return "field-invalid";
+      return "field-valid";
+    }
+
+    if(rule === "required-when-new-group"){
+      if(!isNewGroup) return "field-valid";
+      if(val === "") return "field-pending";
+      return "field-valid";
+    }
+
+    if(rule === "required-number-when-finite"){
+      if(isInfinite) return "field-valid";
+      if(val === "") return "field-pending";
+      const n = parseNumber(val);
+      if(Number.isNaN(n) || n < 0) return "field-invalid";
+      return "field-valid";
+    }
+
+    return "field-valid";
+  }
+
+  function refreshValidation(){
+    liveFields.forEach(el => {
+      const state = validateField(el);
+      setFieldState(el, state);
+    });
+  }
+
+  liveFields.forEach(el => {
+    const ev = el.tagName.toLowerCase() === "select" ? "change" : "input";
+    el.addEventListener(ev, refreshValidation);
+  });
+  grupoSelect.addEventListener("change", refreshValidation);
+  refreshValidation();
+
+  newProdForm.addEventListener("submit", (e) => {
+    const allStates = liveFields.map(validateField);
+    const hasInvalid = allStates.includes("field-invalid");
+    const hasPending = allStates.includes("field-pending");
+
+    if(hasInvalid || hasPending){
+      e.preventDefault();
+      refreshValidation();
+      alert("Completa los campos obligatorios y corrige los que están en rojo antes de crear el producto.");
+      return;
+    }
+
+    // Normaliza numéricos con punto decimal antes de enviar.
+    ["precio_unitario", "stock_minimo", "stock_actual"].forEach(name => {
+      const input = newProdForm.querySelector(`[name="${name}"]`);
+      if(input.disabled) return;
+      input.value = input.value.trim().replace(",", ".");
+    });
+  });
+
+  // --- Formato visual € para inputs de precio ---
+  function normalizeEuroRaw(raw){
+    let t = (raw || "").trim().replace(/[€\s]/g, "");
+    if (t === "") return "";
+    if (t.includes(",")) {
+      t = t.replace(/\./g, "").replace(",", ".");
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n)) return "";
+    return String(n);
+  }
+
+  function formatEuroDisplay(raw){
+    const norm = normalizeEuroRaw(raw);
+    if (!norm) return "";
+    const n = Number(norm);
+    return `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  }
+
+  const euroInputs = Array.from(document.querySelectorAll(".js-eur-input"));
+  euroInputs.forEach((input) => {
+    input.addEventListener("focus", () => {
+      const norm = normalizeEuroRaw(input.value);
+      if (!norm) return;
+      const n = Number(norm);
+      input.value = n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    });
+    input.addEventListener("blur", () => {
+      if (document.activeElement === input) return;
+      const out = formatEuroDisplay(input.value);
+      if (out) input.value = out;
+    });
+    if ((input.value || "").trim() !== "") {
+      const out = formatEuroDisplay(input.value);
+      if (out) input.value = out;
+    }
+  });
+
+  // --- Detalle: modo edición ---
+  const detailForm = document.querySelector('#productDetailBox form');
+  if (detailForm) {
+    const editableFields = Array.from(detailForm.querySelectorAll(".js-detail-input"));
+    const stockInfDetail = detailForm.querySelector(".js-stock-inf-detail");
+    const stockMinDetail = detailForm.querySelector(".js-stock-min");
+    const stockCurrentDetail = detailForm.querySelector(".js-stock-current");
+    const btnEditDetail = document.getElementById("btnEditDetail");
+    const btnCancelDetail = document.getElementById("btnCancelDetail");
+    const actionsView = document.getElementById("detailActionsView");
+    const actionsEdit = document.getElementById("detailActionsEdit");
+
+    const initialState = {};
+    editableFields.forEach((el) => {
+      if (el.type === "checkbox") initialState[el.name] = !!el.checked;
+      else initialState[el.name] = el.value;
+    });
+    const initialReserveReal = stockMinDetail ? (stockMinDetail.dataset.real || "0") : "0";
+    const initialCurrentValue = stockCurrentDetail ? (stockCurrentDetail.value || "") : "";
+
+    function syncDetailReserveField() {
+      if (!stockInfDetail || !stockMinDetail || !stockCurrentDetail) return;
+      const inf = !!stockInfDetail.checked;
+      const editing = editableFields.some((el) => !el.disabled);
+
+      if (inf) {
+        if (!stockMinDetail.classList.contains("input-na")) {
+          stockMinDetail.dataset.lastValue = stockMinDetail.value;
+        }
+        stockMinDetail.value = "No aplica";
+        stockMinDetail.classList.add("input-na");
+        stockMinDetail.disabled = true;
+
+        stockCurrentDetail.value = "No aplica";
+        stockCurrentDetail.classList.add("input-na");
+        stockCurrentDetail.classList.remove("stock-current-ok", "stock-current-low");
+        stockCurrentDetail.disabled = true;
+      } else {
+        const candidate = stockMinDetail.dataset.lastValue || initialReserveReal || "0";
+        stockMinDetail.value = candidate;
+        stockMinDetail.classList.remove("input-na");
+        stockMinDetail.disabled = !editing;
+
+        stockCurrentDetail.classList.remove("input-na");
+        if ((stockCurrentDetail.value || "").trim() === "" || stockCurrentDetail.value === "No aplica") {
+          stockCurrentDetail.value = initialCurrentValue;
+        }
+        stockCurrentDetail.disabled = !editing;
+      }
+    }
+
+    function setDetailEditMode(isEditing) {
+      editableFields.forEach((el) => {
+        if (el === stockMinDetail) return;
+        el.disabled = !isEditing;
+      });
+      if (actionsView) actionsView.style.display = isEditing ? "none" : "";
+      if (actionsEdit) actionsEdit.style.display = isEditing ? "" : "none";
+      syncDetailReserveField();
+    }
+
+    if (stockInfDetail) {
+      stockInfDetail.addEventListener("change", syncDetailReserveField);
+    }
+    if (btnEditDetail) {
+      btnEditDetail.addEventListener("click", () => setDetailEditMode(true));
+    }
+    if (btnCancelDetail) {
+      btnCancelDetail.addEventListener("click", () => {
+        editableFields.forEach((el) => {
+          if (el.type === "checkbox") el.checked = !!initialState[el.name];
+          else el.value = initialState[el.name] ?? "";
+        });
+        stockMinDetail.dataset.lastValue = initialReserveReal;
+        setDetailEditMode(false);
+      });
+    }
+
+    detailForm.addEventListener("submit", (e) => {
+      const submitter = e.submitter;
+      const isDelete = submitter && submitter.id === "btnDeleteDetail";
+      if (isDelete) return;
+
+      editableFields.forEach((el) => {
+        if (el.classList.contains("js-stock-min") && (stockInfDetail && stockInfDetail.checked)) {
+          el.disabled = false;
+          el.value = "0";
+          return;
+        }
+        if (el.classList.contains("js-stock-current") && (stockInfDetail && stockInfDetail.checked)) {
+          el.disabled = false;
+          el.value = "";
+          return;
+        }
+        if (el.classList.contains("js-eur-input")) {
+          el.value = normalizeEuroRaw(el.value);
+        }
+        el.disabled = false;
+      });
+    });
+
+    setDetailEditMode(false);
+  }
+</script>
+
+{% endblock %}

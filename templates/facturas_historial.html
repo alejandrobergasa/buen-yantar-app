@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel page-intro">
+  <h1 class="page-title page-title-left">📚 Historial de facturas</h1>
+  <p class="lead">Consulta facturas registradas, filtra por texto y despliega líneas de detalle cuando lo necesites.</p>
+</section>
+
+<section class="panel">
+  <form method="get" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">🔎 Buscar</label>
+        <input
+          class="input"
+          name="q"
+          value="{{ current_q }}"
+          placeholder="Factura, cliente o nota"
+        >
+      </div>
+      <div class="actions" style="align-items:flex-end;">
+        <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a class="btn btn-secondary" href="{{ url_for('historial_facturas') }}">Limpiar</a>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:0.75rem;">
+  {% if not invoices %}
+    <div class="empty">No hay facturas registradas.</div>
+  {% else %}
+    <p class="help">Sugerencia: usa el buscador para localizar una factura por referencia, cliente o nota.</p>
+    <div class="inv-scrollbox" style="max-height:70vh;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Factura</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th class="right">Líneas</th>
+            <th class="right">Total</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for inv in invoices %}
+            {% set fid = inv.factura_id %}
+            <tr>
+              <td><strong>{{ fid }}</strong></td>
+              <td>{{ (inv.fecha or "")[:10] }}</td>
+              <td>{{ inv.cliente or "-" }}</td>
+              <td class="right">{{ inv.lineas or "0" }}</td>
+              <td class="right">{{ inv.total_importe or "0.00" }} €</td>
+              <td>
+                <details>
+                  <summary>Ver líneas</summary>
+                  {% set lines = lines_map.get(fid, []) %}
+                  {% if not lines %}
+                    <div class="help" style="margin-top:0.4rem;">Sin líneas registradas.</div>
+                  {% else %}
+                    <div class="inv-scrollbox" style="max-height:14rem; margin-top:0.5rem;">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Producto</th>
+                            <th class="right">Cant.</th>
+                            <th class="right">€/u</th>
+                            <th class="right">Importe</th>
+                            <th>Nota</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for ln in lines %}
+                            <tr>
+                              <td>{{ ln.producto_nombre or ln.producto_id }}</td>
+                              <td class="right">{{ ln.cantidad }} {{ ln.unidad }}</td>
+                              <td class="right">{{ ln.precio_unitario }} €</td>
+                              <td class="right">{{ ln.importe_linea }} €</td>
+                              <td>{{ ln.nota or "-" }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  {% endif %}
+                  {% if inv.nota_global %}
+                    <div class="help" style="margin-top:0.5rem;"><strong>Nota:</strong> {{ inv.nota_global }}</div>
+                  {% endif %}
+                  {% if inv.usuario %}
+                    <div class="help"><strong>Registrada por:</strong> {{ inv.usuario }}</div>
+                  {% endif %}
+                </details>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>
+
+{% endblock %}

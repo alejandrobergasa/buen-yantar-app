@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="center-wrap">
+  <div class="card card-wide">
+    <h1 class="title">{{ heading }}</h1>
+    <p class="subtitle">{{ text }}</p>
+    <a class="btn btn-primary" href="{{ url_for('home') }}">Volver a inicio</a>
+  </div>
+</div>
+{% endblock %}

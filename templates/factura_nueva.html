@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel page-intro">
+  <h1 class="page-title page-title-left">🧾 Nueva factura</h1>
+  <p class="lead">Selecciona productos a la izquierda y rellena cantidades/precios en el ticket de la derecha.</p>
+  <div class="flow-steps">
+    <span class="step-chip">1. Filtra productos</span>
+    <span class="step-chip">2. Añade líneas al ticket</span>
+    <span class="step-chip">3. Revisa total y registra</span>
+  </div>
+</section>
+
+<div class="purchase-layout">
+  <section class="panel purchase-left">
+    <h2 class="panel-title">🧺 Productos disponibles</h2>
+
+    <div class="inv-filters">
+      <div>
+        <label class="label">🔎 Buscar</label>
+        <input
+          id="invoiceSearch"
+          class="input"
+          placeholder="Escribe nombre del producto"
+          value="{{ current_filters.q }}"
+        >
+      </div>
+      <div>
+        <label class="label">🧩 Grupo</label>
+        <select id="invoiceGroup">
+          <option value="">(Todos)</option>
+          {% for g, e in group_options %}
+            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="inv-scrollbox purchase-products-box">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th class="right">Stock</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in products %}
+            <tr
+              class="row-click invoice-product-row"
+              data-product-id="{{ p.producto_id }}"
+              data-name="{{ p.nombre }}"
+              data-group="{{ p.grupo }}"
+              data-unit="{{ p.unidad }}"
+              data-emoji="{{ p.grupo_emoji }}"
+              data-inf="{{ p.stock_infinito }}"
+              data-price="{{ p.precio_unitario or '0' }}"
+              tabindex="0"
+              role="button"
+              aria-label="Añadir {{ p.nombre }} a la factura"
+            >
+              <td>
+                <div class="product-row-head">
+                  <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
+                </div>
+                <div class="help">{{ p.grupo_emoji }} {{ p.grupo }}</div>
+              </td>
+              <td class="right">
+                {% if p.stock_infinito == "1" %}
+                  ♾️
+                {% else %}
+                  {% set cur = (p.stock_actual or 0) %}
+                  {% if (cur % 1) == 0 %}
+                    {{ "%.0f"|format(cur) }} {{ p.unidad }}
+                  {% else %}
+                    {{ "%.2f"|format(cur) }} {{ p.unidad }}
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="help">Pulsa sobre un producto para añadirlo al ticket.</p>
+  </section>
+
+  <section class="panel purchase-right">
+    <h2 class="panel-title">🧾 Factura</h2>
+
+    <form method="post" action="{{ url_for('nueva_factura_post') }}" id="invoiceForm" class="form">
+      <input type="hidden" name="f_q" id="invoiceFQ" value="{{ current_filters.q }}">
+      <input type="hidden" name="f_g" id="invoiceFG" value="{{ current_filters.g }}">
+      <div class="grid-2">
+        <div>
+          <label class="label">📅 Fecha factura</label>
+          <input class="input" type="date" name="fecha_factura" value="{{ today_iso }}" required>
+        </div>
+        <div>
+          <label class="label">👤 Cliente (opcional)</label>
+          <input class="input" name="cliente" placeholder="Ej: Mesa socios sábado">
+        </div>
+      </div>
+
+      <div>
+        <label class="label">📝 Nota global (opcional)</label>
+        <input class="input" name="nota_global" placeholder="Observación general">
+      </div>
+
+      <div class="inv-scrollbox purchase-lines-box">
+        <table class="table purchase-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="right">Cantidad</th>
+              <th class="right">Precio unitario</th>
+              <th class="right">Importe</th>
+              <th>Nota línea</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="invoiceLines">
+            <tr id="invoiceEmpty">
+              <td colspan="6" class="empty">Selecciona productos desde la columna izquierda.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="purchase-summary">
+        <span class="badge">Líneas: <strong id="sumLines">0</strong></span>
+        <span class="badge">Unidades: <strong id="sumUnits">0</strong></span>
+        <span class="badge badge-ok">Total: <strong id="sumAmount">0.00 €</strong></span>
+      </div>
+
+      <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
+        Total factura: <strong id="sumAmountPinned">0.00 €</strong>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">✅ Registrar factura</button>
+        <a class="btn btn-secondary" href="{{ url_for('home') }}">↩️ Volver</a>
+      </div>
+    </form>
+  </section>
+</div>
+
+<template id="invoiceRowTpl">
+  <tr class="invoice-row">
+    <td>
+      <input type="hidden" name="producto_id[]" class="ticket-product-id">
+      <div class="ticket-product-name"></div>
+      <div class="help ticket-product-meta"></div>
+    </td>
+    <td class="right">
+      <input class="input input-num js-invoice-field" name="cantidad[]" data-rule="positive-number" placeholder="0">
+    </td>
+    <td class="right">
+      <input class="input input-num js-invoice-field" name="precio_unitario[]" data-rule="non-negative-number" placeholder="0.00">
+    </td>
+    <td class="right">
+      <div class="readonly js-line-amount">0.00 €</div>
+    </td>
+    <td>
+      <input class="input" name="nota_linea[]" placeholder="Opcional">
+    </td>
+    <td>
+      <button type="button" class="btn btn-secondary purchase-remove">🗑️</button>
+    </td>
+  </tr>
+</template>
+
+<script>
+  function normalizeText(s) {
+    return (s || "")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+  }
+
+  function parseNumber(raw){
+    let t = (raw || "").trim().replace(/\s/g, "");
+    if (!t) return null;
+    if (t.includes(",") && t.includes(".")) {
+      if (t.lastIndexOf(",") > t.lastIndexOf(".")) {
+        t = t.replace(/\./g, "").replace(",", ".");
+      } else {
+        t = t.replace(/,/g, "");
+      }
+    } else {
+      t = t.replace(",", ".");
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function setFieldState(el, state){
+    el.classList.remove("field-pending", "field-valid", "field-invalid");
+    el.classList.add(state);
+  }
+
+  function validateField(el){
+    const rule = el.dataset.rule || "";
+    const val = (el.value || "").trim();
+
+    if (rule === "positive-number"){
+      if (!val) return "field-pending";
+      const n = parseNumber(val);
+      if (Number.isNaN(n) || n <= 0) return "field-invalid";
+      return "field-valid";
+    }
+    if (rule === "non-negative-number"){
+      if (!val) return "field-pending";
+      const n = parseNumber(val);
+      if (Number.isNaN(n) || n < 0) return "field-invalid";
+      return "field-valid";
+    }
+    return "field-valid";
+  }
+
+  const searchBox = document.getElementById("invoiceSearch");
+  const groupFilter = document.getElementById("invoiceGroup");
+  const productRows = Array.from(document.querySelectorAll(".invoice-product-row"));
+
+  const invoiceLines = document.getElementById("invoiceLines");
+  const invoiceEmpty = document.getElementById("invoiceEmpty");
+  const rowTpl = document.getElementById("invoiceRowTpl");
+  const invoiceForm = document.getElementById("invoiceForm");
+  const hiddenFQ = document.getElementById("invoiceFQ");
+  const hiddenFG = document.getElementById("invoiceFG");
+  const sumLines = document.getElementById("sumLines");
+  const sumUnits = document.getElementById("sumUnits");
+  const sumAmount = document.getElementById("sumAmount");
+  const sumAmountPinned = document.getElementById("sumAmountPinned");
+
+  const selectedById = new Map();
+
+  function applyProductFilters(){
+    const q = normalizeText(searchBox.value);
+    const g = (groupFilter.value || "").trim();
+
+    productRows.forEach((tr) => {
+      const name = normalizeText(tr.dataset.name || "");
+      const group = (tr.dataset.group || "").trim();
+      const okText = (q === "") || name.includes(q);
+      const okGroup = (g === "") || (group === g);
+      tr.style.display = (okText && okGroup) ? "" : "none";
+    });
+  }
+
+  function syncFilterState(){
+    const q = (searchBox.value || "").trim();
+    const g = (groupFilter.value || "").trim();
+
+    if (hiddenFQ) hiddenFQ.value = q;
+    if (hiddenFG) hiddenFG.value = g;
+
+    const next = new URL(window.location.href);
+    if (q) next.searchParams.set("q", q);
+    else next.searchParams.delete("q");
+    if (g) next.searchParams.set("g", g);
+    else next.searchParams.delete("g");
+    const search = next.searchParams.toString();
+    history.replaceState(null, "", `${next.pathname}${search ? `?${search}` : ""}`);
+  }
+
+  function updateLineAmount(row){
+    const qty = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
+    const price = parseNumber(row.querySelector('input[name="precio_unitario[]"]').value);
+    const amountBox = row.querySelector(".js-line-amount");
+
+    if (
+      qty === null || price === null
+      || Number.isNaN(qty) || Number.isNaN(price)
+      || qty <= 0 || price < 0
+    ) {
+      amountBox.textContent = "0.00 €";
+      return;
+    }
+
+    amountBox.textContent = `${(qty * price).toFixed(2)} €`;
+  }
+
+  function refreshSummary(){
+    const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
+    let lines = rows.length;
+    let units = 0;
+    let amount = 0;
+
+    rows.forEach((row) => {
+      const q = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
+      const p = parseNumber(row.querySelector('input[name="precio_unitario[]"]').value);
+      if (q !== null && !Number.isNaN(q) && q > 0){
+        units += q;
+        if (p !== null && !Number.isNaN(p) && p >= 0){
+          amount += q * p;
+        }
+      }
+      updateLineAmount(row);
+    });
+
+    sumLines.textContent = String(lines);
+    sumUnits.textContent = Number.isInteger(units) ? String(units) : units.toFixed(2);
+    const totalText = `${amount.toFixed(2)} €`;
+    sumAmount.textContent = totalText;
+    sumAmountPinned.textContent = totalText;
+  }
+
+  function refreshEmptyState(){
+    invoiceEmpty.style.display = (selectedById.size === 0) ? "" : "none";
+  }
+
+  function attachRowEvents(row){
+    const qty = row.querySelector('input[name="cantidad[]"]');
+    const price = row.querySelector('input[name="precio_unitario[]"]');
+    const note = row.querySelector('input[name="nota_linea[]"]');
+    const removeBtn = row.querySelector(".purchase-remove");
+    const pid = row.querySelector(".ticket-product-id").value;
+
+    [qty, price].forEach((el) => {
+      el.addEventListener("input", () => {
+        setFieldState(el, validateField(el));
+        refreshSummary();
+      });
+    });
+    note.addEventListener("input", refreshSummary);
+
+    removeBtn.addEventListener("click", () => {
+      selectedById.delete(pid);
+      row.remove();
+      refreshEmptyState();
+      refreshSummary();
+    });
+  }
+
+  function addProductToInvoice(sourceRow){
+    const pid = sourceRow.dataset.productId;
+    if (!pid) return;
+
+    if (selectedById.has(pid)){
+      const existing = selectedById.get(pid);
+      existing.querySelector('input[name="cantidad[]"]').focus();
+      return;
+    }
+
+    const row = rowTpl.content.firstElementChild.cloneNode(true);
+    row.querySelector(".ticket-product-id").value = pid;
+
+    const name = sourceRow.dataset.name || "";
+    const emoji = sourceRow.dataset.emoji || "📦";
+    const group = sourceRow.dataset.group || "Otros";
+    const unit = sourceRow.dataset.unit || "ud";
+    const inf = sourceRow.dataset.inf === "1";
+    const defaultPrice = sourceRow.dataset.price || "0";
+
+    row.querySelector(".ticket-product-name").textContent = `${emoji} ${name}`;
+    row.querySelector(".ticket-product-meta").textContent = `${emoji} ${group} · Unidad: ${unit} · Stock: ${inf ? "♾️" : "normal"}`;
+
+    row.querySelector('input[name="cantidad[]"]').value = "1";
+    row.querySelector('input[name="precio_unitario[]"]').value = defaultPrice;
+
+    invoiceLines.appendChild(row);
+    selectedById.set(pid, row);
+    attachRowEvents(row);
+    refreshEmptyState();
+    refreshSummary();
+
+    row.querySelector('input[name="cantidad[]"]').focus();
+  }
+
+  productRows.forEach((tr) => {
+    tr.addEventListener("click", () => addProductToInvoice(tr));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        addProductToInvoice(tr);
+      }
+    });
+  });
+
+  searchBox.addEventListener("input", () => {
+    applyProductFilters();
+    syncFilterState();
+  });
+  groupFilter.addEventListener("change", () => {
+    applyProductFilters();
+    syncFilterState();
+  });
+  applyProductFilters();
+  syncFilterState();
+  refreshSummary();
+
+  invoiceForm.addEventListener("submit", (e) => {
+    const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
+    if (rows.length === 0){
+      e.preventDefault();
+      alert("Debes añadir al menos un producto antes de registrar la factura.");
+      return;
+    }
+
+    let hasErrors = false;
+    rows.forEach((row) => {
+      row.querySelectorAll(".js-invoice-field").forEach((field) => {
+        const state = validateField(field);
+        setFieldState(field, state);
+        if (state === "field-invalid" || state === "field-pending"){
+          hasErrors = true;
+        }
+      });
+    });
+
+    if (hasErrors){
+      e.preventDefault();
+      alert("Revisa cantidad y precio de las líneas marcadas antes de continuar.");
+      return;
+    }
+
+    rows.forEach((row) => {
+      ["cantidad[]", "precio_unitario[]"].forEach((name) => {
+        const input = row.querySelector(`[name="${name}"]`);
+        const n = parseNumber(input.value);
+        if (n !== null && !Number.isNaN(n)) {
+          input.value = String(n);
+        }
+      });
+    });
+  });
+</script>
+
+{% endblock %}
