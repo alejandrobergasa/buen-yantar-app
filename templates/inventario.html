@@ -1,14 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 
-<section class="panel page-intro">
+<section class="inv-page-head">
   <h1 class="page-title page-title-left">📦 Inventario</h1>
-  <p class="lead">Busca un producto, consulta su stock y edítalo sin salir de esta pantalla.</p>
-  <div class="flow-steps">
-    <span class="step-chip">1. Filtra en el listado</span>
-    <span class="step-chip">2. Selecciona un producto</span>
-    <span class="step-chip">3. Edita y guarda cambios</span>
-  </div>
+  <p class="lead">Busca rápido, revisa estado de stock y edita el producto seleccionado.</p>
 </section>
 
 <div class="inv-page inv-compact">
@@ -17,7 +12,7 @@
     <!-- COLUMNA 1: LISTADO -->
     <section class="inv-col">
       <div class="panel inv-panel">
-        <h2 class="panel-title">🧺 Listado de productos</h2>
+        <h2 class="panel-title">Listado de productos ({{ products_table|length }})</h2>
 
         <!-- Filtros: 2 columnas en la misma fila -->
         <div class="inv-filters">
@@ -41,7 +36,13 @@
             </label>
           </div>
         </div>
-        <p class="help">Puedes filtrar por nombre, por grupo o mostrar solo artículos con stock bajo.</p>
+        <div class="inv-legend">
+          <span class="badge">Estado:</span>
+          <span class="product-state state-ok">OK</span>
+          <span class="product-state state-low">BAJO</span>
+          <span class="product-state state-zero">0</span>
+          <span class="product-state state-inf">INF</span>
+        </div>
 
         <!-- Lista con scroll interno -->
         <div class="inv-scrollbox" id="listBox">
@@ -64,22 +65,21 @@
                   tabindex="0"
                   role="button"
                   aria-label="Abrir detalle de {{ r.nombre }}"
-                  style="cursor:pointer;"
                 >
                   <td>
                     <div class="product-row-head">
                       <span class="product-name">{{ r.grupo_emoji }} {{ r.nombre }}</span>
                       {% if r.stock_infinito == "1" %}
-                        <span class="product-state state-inf">♾️</span>
+                        <span class="product-state state-inf">INF</span>
                       {% elif r.total == 0 %}
-                        <span class="product-state state-zero">🔴</span>
+                        <span class="product-state state-zero">0</span>
                       {% elif r.total < (r.stock_minimo | float) %}
-                        <span class="product-state state-low">⚠️</span>
+                        <span class="product-state state-low">BAJO</span>
                       {% else %}
-                        <span class="product-state state-ok">✅</span>
+                        <span class="product-state state-ok">OK</span>
                       {% endif %}
                     </div>
-                    <div class="help">{{ r.grupo_emoji }} {{ r.grupo }}</div>
+                    <div class="product-row-meta">{{ r.grupo_emoji }} {{ r.grupo }} · Unidad: {{ r.unidad }}</div>
                   </td>
 
                   <td class="right">
@@ -100,8 +100,12 @@
         </div>
 
         <!-- Botón crear nuevo producto -->
-        <div style="margin-top:0.6rem;">
-          <button class="btn btn-primary" type="button" onclick="toggleNewProduct(true)">➕ Nuevo producto</button>
+        <div class="inv-create-actions">
+          {% if g.is_admin %}
+            <button class="btn btn-primary" type="button" onclick="toggleNewProduct(true)">➕ Nuevo producto</button>
+          {% else %}
+            <div class="help">Solo administradores pueden crear productos.</div>
+          {% endif %}
         </div>
 
       </div>
@@ -114,7 +118,7 @@
 
         <div class="inv-detail-scroll">
           <div id="newProductMiddleBox" class="inv-newbox" style="display:none;">
-            <h3 style="text-align:center; margin:0 0 0.5rem; font-size:1.05rem; font-weight:950;">➕ Crear producto</h3>
+            <h3 class="inv-newbox-title">➕ Crear producto</h3>
 
             <form method="post" action="{{ url_for('inventario_nuevo_producto') }}" class="form" id="newProdForm">
               <input type="hidden" name="f_q" value="{{ current_filters.q }}">
@@ -288,16 +292,18 @@
                     <div class="actions" id="detailActionsEdit" style="display:none;">
                       <button class="btn btn-primary" type="submit">💾 Guardar cambios</button>
                       <button class="btn btn-secondary" type="button" id="btnCancelDetail">↩️ Cancelar cambios</button>
-                      <button
-                        id="btnDeleteDetail"
-                        class="btn btn-secondary"
-                        type="submit"
-                        formaction="{{ url_for('inventario_eliminar') }}"
-                        formmethod="post"
-                        onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
-                      >
-                        🗑️ Eliminar producto
-                      </button>
+                      {% if g.is_admin %}
+                        <button
+                          id="btnDeleteDetail"
+                          class="btn btn-secondary"
+                          type="submit"
+                          formaction="{{ url_for('inventario_eliminar') }}"
+                          formmethod="post"
+                          onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
+                        >
+                          🗑️ Eliminar producto
+                        </button>
+                      {% endif %}
                     </div>
                   </form>
                 </div>

@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from datetime import date
 import os
 import config
 
 from services.csv_store import ensure_csv
-from services.auth import ensure_default_admin, verify_login, USERS_HEADERS
+from services.audit import AUDIT_HEADERS, log_action, list_logs
+from services.auth import (
+    ensure_default_admin,
+    verify_login,
+    USERS_HEADERS,
+    ensure_user_schema,
+    find_user_by_username,
+    is_admin,
+    list_users,
+    create_user,
+    update_password,
+    delete_user,
+)
+from services.purchases import list_purchase_history
 from services.inventory import (
     PRODUCT_HEADERS, MOV_HEADERS,
     ensure_product_schema,
@@ -36,6 +49,8 @@ def create_app() -> Flask:
     ensure_csv(config.CSV_MOVS, MOV_HEADERS)
     ensure_csv(config.CSV_FACTURAS, INVOICE_HEADERS)
     ensure_csv(config.CSV_FACTURA_LINEAS, INVOICE_LINE_HEADERS)
+    ensure_csv(config.CSV_LOGS, AUDIT_HEADERS)
+    ensure_user_schema(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR)
     ensure_product_schema(config.CSV_PRODUCTOS, backup_dir=config.BACKUP_DIR)
 
     ensure_default_admin(config.CSV_USUARIOS)
@@ -46,6 +61,30 @@ def create_app() -> Flask:
         if not session.get("user"):
             return redirect(url_for("login"))
         return None
+
+    def current_user_row() -> dict | None:
+        username = session.get("user", "")
+        if not username:
+            return None
+        return find_user_by_username(config.CSV_USUARIOS, username)
+
+    def user_is_admin() -> bool:
+        return is_admin(current_user_row())
+
+    def require_admin():
+        r = require_login()
+        if r:
+            return r
+        if not user_is_admin():
+            flash("Acceso solo para administradores.")
+            return redirect(url_for("home"))
+        return None
+
+    @app.before_request
+    def inject_user_context():
+        u = current_user_row()
+        g.current_user = u
+        g.is_admin = is_admin(u)
 
     def inventario_redirect_with_filters(producto_id: str | None = None):
         q = (request.form.get("f_q") or request.args.get("q") or "").strip()
@@ -94,6 +133,18 @@ def create_app() -> Flask:
 
         return float(t)
 
+    @app.after_request
+    def audit_every_request(response):
+        endpoint = (request.endpoint or "").strip()
+        if endpoint == "static" or request.path.startswith("/static/"):
+            return response
+
+        user = (getattr(g, "audit_user", "") or session.get("user", "") or "anon").strip()
+        action = f"{request.method} {request.path}"
+        detail = f"endpoint={endpoint or '-'} status={response.status_code}"
+        log_action(config.CSV_LOGS, user, action, detail)
+        return response
+
     # -------- AUTH --------
     @app.get("/login")
     def login():
@@ -105,6 +156,7 @@ def create_app() -> Flask:
     def login_post():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        g.audit_user = username or "anon"
 
         if verify_login(config.CSV_USUARIOS, username, password):
             session["user"] = username
@@ -115,8 +167,109 @@ def create_app() -> Flask:
 
     @app.get("/logout")
     def logout():
+        g.audit_user = session.get("user", "") or "anon"
         session.clear()
         return redirect(url_for("login"))
+
+    @app.get("/usuarios/gestion")
+    def gestion_usuarios():
+        r = require_login()
+        if r:
+            return r
+        users = list_users(config.CSV_USUARIOS) if user_is_admin() else []
+        return render_template(
+            "usuarios_gestion.html",
+            title="Gestion de usuario",
+            is_admin=user_is_admin(),
+            users=users,
+        )
+
+    @app.post("/usuarios/cambiar_password")
+    def cambiar_password():
+        r = require_login()
+        if r:
+            return r
+
+        username = session.get("user", "")
+        current_password = (request.form.get("password_actual") or "").strip()
+        new_password = (request.form.get("password_nueva") or "").strip()
+        repeat_password = (request.form.get("password_repetir") or "").strip()
+
+        if not verify_login(config.CSV_USUARIOS, username, current_password):
+            flash("La contraseña actual no es correcta.")
+            return redirect(url_for("gestion_usuarios"))
+        if len(new_password) < 4:
+            flash("La nueva contraseña debe tener al menos 4 caracteres.")
+            return redirect(url_for("gestion_usuarios"))
+        if new_password != repeat_password:
+            flash("La nueva contraseña y la repetición no coinciden.")
+            return redirect(url_for("gestion_usuarios"))
+
+        update_password(
+            config.CSV_USUARIOS,
+            backup_dir=config.BACKUP_DIR,
+            username=username,
+            new_password=new_password,
+        )
+        flash("Contraseña actualizada ✅")
+        return redirect(url_for("gestion_usuarios"))
+
+    @app.post("/usuarios/crear")
+    def crear_usuario():
+        r = require_admin()
+        if r:
+            return r
+
+        username = (request.form.get("username") or "").strip()
+        password = (request.form.get("password") or "").strip()
+        role = (request.form.get("rol") or "normal").strip().lower()
+
+        if not username:
+            flash("El nombre de usuario es obligatorio.")
+            return redirect(url_for("gestion_usuarios"))
+        if len(password) < 4:
+            flash("La contraseña debe tener al menos 4 caracteres.")
+            return redirect(url_for("gestion_usuarios"))
+
+        try:
+            create_user(config.CSV_USUARIOS, username=username, password=password, rol=role)
+        except ValueError as exc:
+            flash(str(exc))
+            return redirect(url_for("gestion_usuarios"))
+
+        flash("Usuario creado ✅")
+        return redirect(url_for("gestion_usuarios"))
+
+    @app.post("/usuarios/eliminar")
+    def eliminar_usuario():
+        r = require_admin()
+        if r:
+            return r
+
+        username = (request.form.get("username") or "").strip()
+        if not username:
+            flash("Usuario no válido.")
+            return redirect(url_for("gestion_usuarios"))
+
+        me = (session.get("user") or "").strip().lower()
+        if username.lower() == me:
+            flash("No puedes desactivar tu propio usuario.")
+            return redirect(url_for("gestion_usuarios"))
+
+        users = list_users(config.CSV_USUARIOS)
+        target = next((u for u in users if (u.get("username") or "").strip().lower() == username.lower()), None)
+        if not target:
+            flash("Usuario no encontrado.")
+            return redirect(url_for("gestion_usuarios"))
+
+        try:
+            delete_user(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR, username=username)
+        except ValueError as exc:
+            flash(str(exc))
+            return redirect(url_for("gestion_usuarios"))
+
+        flash("Usuario eliminado 🗑️")
+        return redirect(url_for("gestion_usuarios"))
 
     @app.get("/")
     def root():
@@ -199,7 +352,7 @@ def create_app() -> Flask:
 
     @app.post("/inventario/nuevo_producto")
     def inventario_nuevo_producto():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -324,7 +477,7 @@ def create_app() -> Flask:
 
     @app.post("/inventario/eliminar")
     def inventario_eliminar():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -520,6 +673,14 @@ def create_app() -> Flask:
                 if query in (row.get("factura_id", "").lower())
                 or query in (row.get("cliente", "").lower())
                 or query in (row.get("nota_global", "").lower())
+                or query in (row.get("usuario", "").lower())
+            ]
+
+        if not user_is_admin():
+            me = (session.get("user") or "").strip().lower()
+            invoices = [
+                row for row in invoices
+                if (row.get("usuario") or "").strip().lower() == me
             ]
 
         return render_template(
@@ -528,6 +689,69 @@ def create_app() -> Flask:
             invoices=invoices,
             lines_map=lines_map,
             current_q=(request.args.get("q") or "").strip(),
+        )
+
+    @app.get("/compras/historial")
+    def historial_compras():
+        r = require_login()
+        if r:
+            return r
+
+        prods = get_products(config.CSV_PRODUCTOS)
+        product_names = {p.get("producto_id", ""): p.get("nombre", "") for p in prods}
+        tickets, lines_map = list_purchase_history(
+            config.CSV_MOVS,
+            product_names=product_names,
+            limit=500,
+        )
+
+        query = (request.args.get("q") or "").strip().lower()
+        if query:
+            filtered = []
+            for t in tickets:
+                if (
+                    query in (t.get("ref_id", "").lower())
+                    or query in (t.get("proveedor", "").lower())
+                    or query in (t.get("usuario", "").lower())
+                ):
+                    filtered.append(t)
+            tickets = filtered
+
+        return render_template(
+            "compras_historial.html",
+            title="Historial compras",
+            tickets=tickets,
+            lines_map=lines_map,
+            current_q=(request.args.get("q") or "").strip(),
+        )
+
+    @app.get("/supervision")
+    def supervision():
+        r = require_admin()
+        if r:
+            return r
+
+        all_logs = list_logs(config.CSV_LOGS, limit=2000)
+        logs = list(all_logs)
+        q = (request.args.get("q") or "").strip().lower()
+        user = (request.args.get("user") or "").strip().lower()
+
+        if q:
+            logs = [
+                row for row in logs
+                if q in (row.get("accion", "").lower()) or q in (row.get("detalle", "").lower())
+            ]
+        if user:
+            logs = [row for row in logs if user in (row.get("usuario", "").lower())]
+
+        users = sorted({(row.get("usuario") or "").strip() for row in all_logs if (row.get("usuario") or "").strip()})
+        return render_template(
+            "supervision.html",
+            title="Supervision",
+            logs=logs,
+            current_q=(request.args.get("q") or "").strip(),
+            current_user=(request.args.get("user") or "").strip(),
+            user_options=users,
         )
 
     @app.get("/compra/nueva")
@@ -621,6 +845,9 @@ def create_app() -> Flask:
             if pid not in product_map:
                 flash(f"Línea {i+1}: producto no válido o inactivo.")
                 return redirect_with_list_filters("nueva_compra")
+            if (product_map[pid].get("stock_infinito", "0") == "1"):
+                flash(f"Línea {i+1}: no puedes registrar compras de productos con stock infinito.")
+                return redirect_with_list_filters("nueva_compra")
 
             if not qty_raw:
                 flash(f"Línea {i+1}: la cantidad es obligatoria.")
@@ -664,6 +891,7 @@ def create_app() -> Flask:
             provider=provider,
             global_note=global_note,
             purchase_date=purchase_date,
+            user=session.get("user", ""),
         )
         flash(f"Compra registrada ✅ ({len(lines)} líneas, ref: {ref_id})")
         return redirect_with_list_filters("nueva_compra")

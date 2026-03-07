@@ -243,6 +243,7 @@ def add_purchase_entries(
     provider: str = "",
     global_note: str = "",
     purchase_date: str = "",
+    user: str = "",
 ) -> str:
     """
     Registra una compra con 1..N líneas como movimientos ENTRADA y devuelve ref_id.
@@ -254,6 +255,7 @@ def add_purchase_entries(
     provider = (provider or "").strip()
     global_note = (global_note or "").strip()
     purchase_date = (purchase_date or "").strip()
+    user = (user or "").strip()
 
     # Fecha del ticket (YYYY-MM-DD). Si no viene o es inválida, usamos ahora.
     if purchase_date:
@@ -273,6 +275,8 @@ def add_purchase_entries(
         nota_linea = (line.get("nota") or "").strip()
 
         note_parts: List[str] = []
+        if user:
+            note_parts.append(f"Usr: {user}")
         if provider:
             note_parts.append(f"Prov: {provider}")
         if precio_compra:

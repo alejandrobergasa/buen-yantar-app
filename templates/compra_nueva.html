@@ -47,22 +47,31 @@
         <tbody id="productsPickTbody">
           {% for p in products %}
             <tr
-              class="row-click purchase-product-row"
+              class="row-click purchase-product-row{% if p.stock_infinito == '1' %} purchase-product-row-disabled{% endif %}"
               data-product-id="{{ p.producto_id }}"
               data-name="{{ p.nombre }}"
               data-group="{{ p.grupo }}"
               data-unit="{{ p.unidad }}"
               data-emoji="{{ p.grupo_emoji }}"
               data-inf="{{ p.stock_infinito }}"
-              tabindex="0"
-              role="button"
-              aria-label="Añadir {{ p.nombre }} al ticket"
+              {% if p.stock_infinito == "1" %}
+                tabindex="-1"
+                aria-disabled="true"
+                aria-label="{{ p.nombre }} no seleccionable por stock infinito"
+              {% else %}
+                tabindex="0"
+                role="button"
+                aria-label="Añadir {{ p.nombre }} al ticket"
+              {% endif %}
             >
               <td>
                 <div class="product-row-head">
                   <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
                 </div>
                 <div class="help">{{ p.grupo_emoji }} {{ p.grupo }}</div>
+                {% if p.stock_infinito == "1" %}
+                  <div class="help">No seleccionable en compras (stock infinito)</div>
+                {% endif %}
               </td>
               <td class="right">
                 {% if p.stock_infinito == "1" %}
@@ -81,7 +90,7 @@
         </tbody>
       </table>
     </div>
-    <p class="help">Pulsa sobre un producto para añadirlo al ticket de compra.</p>
+    <p class="help">Pulsa sobre un producto para añadirlo al ticket. Los productos con stock infinito no se pueden seleccionar.</p>
   </section>
 
   <section class="panel purchase-right">
@@ -312,6 +321,7 @@
   function addProductToTicket(sourceRow){
     const pid = sourceRow.dataset.productId;
     if (!pid) return;
+    if (sourceRow.dataset.inf === "1") return;
 
     if (selectedById.has(pid)){
       const existing = selectedById.get(pid);

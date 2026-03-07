@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel page-intro">
+  <h1 class="page-title page-title-left">👤 Gestión de usuario</h1>
+  <p class="lead">Aquí puedes cambiar tu contraseña. Si eres administrador, también puedes gestionar usuarios.</p>
+</section>
+
+<section class="panel">
+  <h2 class="panel-title">🔐 Cambiar contraseña</h2>
+  <form method="post" action="{{ url_for('cambiar_password') }}" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Contraseña actual</label>
+        <input class="input" type="password" name="password_actual" required>
+      </div>
+      <div>
+        <label class="label">Nueva contraseña</label>
+        <input class="input" type="password" name="password_nueva" required>
+      </div>
+    </div>
+    <div>
+      <label class="label">Repetir nueva contraseña</label>
+      <input class="input" type="password" name="password_repetir" required>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Guardar contraseña</button>
+    </div>
+  </form>
+</section>
+
+{% if is_admin %}
+<section class="panel" style="margin-top:0.75rem;">
+  <h2 class="panel-title">🛠️ Panel de control de usuarios</h2>
+
+  <form method="post" action="{{ url_for('crear_usuario') }}" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Usuario</label>
+        <input class="input" name="username" required>
+      </div>
+      <div>
+        <label class="label">Contraseña inicial</label>
+        <input class="input" type="password" name="password" required>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <label class="label">Rol</label>
+        <select name="rol">
+          <option value="normal">Normal</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
+      <div class="actions" style="align-items:flex-end;">
+        <button class="btn btn-primary" type="submit">➕ Dar de alta</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="inv-scrollbox" style="max-height:52vh; margin-top:0.8rem;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Usuario</th>
+          <th>Rol</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+          <tr>
+            <td>{{ u.username }}</td>
+            <td>{{ u.rol or "normal" }}</td>
+            <td>
+              {% if u.username == session.get("user") %}
+                <span class="help">Tu usuario actual</span>
+              {% else %}
+                <form method="post" action="{{ url_for('eliminar_usuario') }}" onsubmit="return confirm('¿Eliminar este usuario?')">
+                  <input type="hidden" name="username" value="{{ u.username }}">
+                  <button class="btn btn-secondary" type="submit">🗑️ Eliminar</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

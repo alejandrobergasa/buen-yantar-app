@@ -1,39 +1,48 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro">
+<section class="home-intro">
   <h1 class="page-title page-title-left">Panel principal</h1>
   <p class="lead">Elige la tarea que quieras hacer. Todas las opciones están explicadas para que sea fácil encontrar lo que necesitas.</p>
 </section>
 
 <div class="action-grid">
-  <a class="action-card action-card-primary" href="{{ url_for('inventario') }}">
+  <a class="action-card" href="{{ url_for('inventario') }}">
     <h2>📦 Inventario</h2>
-    <p>Consulta existencias, edita productos y crea nuevos artículos.</p>
+    <p>Consulta existencias, edita y crea productos</p>
   </a>
 
   <a class="action-card" href="{{ url_for('nueva_factura') }}">
     <h2>🧾 Nueva factura</h2>
-    <p>Registra ventas en pocos pasos y revisa el total automáticamente.</p>
+    <p>Crea una nueva factura</p>
   </a>
 
-  <a class="action-card" href="{{ url_for('historial_facturas') }}">
-    <h2>📚 Historial de facturas</h2>
-    <p>Busca facturas anteriores y revisa rápidamente sus líneas.</p>
-  </a>
-
-  <a class="action-card" href="{{ url_for('nueva_compra') }}">
+  <a class="action-card action-card-short" href="{{ url_for('nueva_compra') }}">
     <h2>🛒 Nueva compra</h2>
-    <p>Añade compras de proveedor y actualiza el stock del inventario.</p>
+    <p>Registra una compra y actualiza el inventario</p>
   </a>
+
+  <a class="action-card action-card-short" href="{{ url_for('historial_facturas') }}">
+    <h2>📚 Historial de facturas</h2>
+    <p>Busca y revisa facturas pasadas</p>
+  </a>
+
+  <a class="action-card action-card-short" href="{{ url_for('historial_compras') }}">
+    <h2>🧾 Historial de compras</h2>
+    <p>Consulta compras registradas por referencia</p>
+  </a>
+
+  {% if g.is_admin %}
+    <a class="action-card action-card-short" href="{{ url_for('supervision') }}">
+      <h2>🧭 Supervisión</h2>
+      <p>Revisa todas las acciones registradas en la app</p>
+    </a>
+  {% endif %}
+
+  <a class="action-card action-card-short" href="{{ url_for('gestion_usuarios') }}">
+    <h2>👤 Gestión de usuario</h2>
+    <p>Cambia tu contraseña y gestiona usuarios (admin)</p>
+  </a>
+
 </div>
 
-<section class="panel quick-help">
-  <h2 class="panel-title">Guía rápida</h2>
-  <div class="flow-steps">
-    <span class="step-chip">1. Revisa inventario antes de vender</span>
-    <span class="step-chip">2. Registra facturas para descontar stock</span>
-    <span class="step-chip">3. Registra compras para reponer productos</span>
-  </div>
-  <p class="help">Si dudas, entra en cualquier pantalla: los campos obligatorios y los estados de validación se marcan automáticamente.</p>
-</section>
 {% endblock %}

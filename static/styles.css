@@ -239,17 +239,26 @@ body {
 
 .action-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
+.home-intro {
+  margin-bottom: 1rem;
+}
+
 .action-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
   text-decoration: none;
   color: var(--text);
-  background: linear-gradient(140deg, #ffffff, #f3faf7);
+  background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 1rem;
-  padding: 0.9rem;
+  padding: 0.82rem;
+  min-height: 7.3rem;
   box-shadow: var(--shadow-soft);
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
@@ -263,8 +272,8 @@ body {
 }
 
 .action-card h2 {
-  margin: 0 0 0.4rem;
-  font-size: 1.1rem;
+  margin: 0 0 0.26rem;
+  font-size: clamp(1.08rem, 1.5vw, 1.35rem);
   font-weight: 900;
 }
 
@@ -272,6 +281,8 @@ body {
   margin: 0;
   color: var(--muted);
   font-weight: 650;
+  font-size: 0.9rem;
+  line-height: 1.3;
 }
 
 .action-card-primary {
@@ -279,9 +290,14 @@ body {
   border-color: #bfe5d8;
 }
 
+.action-card-short {
+  min-height: 6.7rem;
+}
+
 .quick-help {
   margin-top: 0.8rem;
 }
+
 
 .form {
   display: flex;
@@ -461,13 +477,15 @@ select.field-invalid:focus {
   border-bottom: 1px solid #e6eeea;
   font-size: 0.96rem;
   vertical-align: middle;
+  text-align: left;
 }
 
 .table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #eef5f2;
+  background: rgba(238, 245, 242, 0.96);
+  backdrop-filter: blur(2px);
   font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.015em;
@@ -476,6 +494,11 @@ select.field-invalid:focus {
 }
 
 .right {
+  text-align: right;
+}
+
+.table th.right,
+.table td.right {
   text-align: right;
 }
 
@@ -494,6 +517,7 @@ select.field-invalid:focus {
 
 .row-selected {
   background: #e8f5f1;
+  box-shadow: inset 0.24rem 0 0 #1f6d5f;
 }
 
 .product-row-head {
@@ -507,13 +531,20 @@ select.field-invalid:focus {
   font-weight: 850;
 }
 
+.product-row-meta {
+  margin-top: 0.18rem;
+  color: #5b6a77;
+  font-size: 0.82rem;
+}
+
 .product-state {
-  min-width: 1.95rem;
+  min-width: 2.6rem;
   border-radius: 0.55rem;
-  padding: 0.04rem 0.3rem;
+  padding: 0.08rem 0.34rem;
   text-align: center;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   font-weight: 900;
+  letter-spacing: 0.02em;
 }
 
 .product-state.state-zero {
@@ -617,16 +648,28 @@ select.field-invalid:focus {
   margin-top: 0.75rem;
 }
 
+.inv-page-head {
+  margin-top: 0.6rem;
+  margin-bottom: 0.6rem;
+  flex: 0 0 auto;
+}
+
+.inv-page-head .page-title {
+  margin-bottom: 0.25rem;
+}
+
 .inv-grid {
   display: grid;
   grid-template-columns: 1.02fr 1.98fr;
   gap: 0.75rem;
   align-items: stretch;
+  min-height: 0;
 }
 
 .inv-col {
   min-width: 0;
   display: flex;
+  min-height: 0;
 }
 
 .inv-panel {
@@ -634,12 +677,18 @@ select.field-invalid:focus {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-height: 0;
+  background: linear-gradient(160deg, #ffffff, #f8fcfa);
 }
 
 .inv-filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem;
+  border: 1px solid #dce8e2;
+  border-radius: 0.85rem;
+  background: #f4faf7;
+  padding: 0.58rem;
 }
 
 .inv-filters-right {
@@ -667,8 +716,21 @@ select.field-invalid:focus {
   background: #ffffff;
 }
 
+.inv-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.inv-create-actions {
+  margin-top: 0.6rem;
+}
+
 #listBox {
   max-height: 60vh;
+  min-height: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .inv-newbox {
@@ -679,10 +741,18 @@ select.field-invalid:focus {
   padding: 0.8rem;
 }
 
+.inv-newbox-title {
+  text-align: center;
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 950;
+}
+
 .inv-detail-scroll {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  min-height: 0;
 }
 
 .detail-split {
@@ -694,6 +764,7 @@ select.field-invalid:focus {
 .detail-main,
 .detail-side {
   min-width: 0;
+  min-height: 0;
 }
 
 .detail-side {
@@ -705,8 +776,62 @@ select.field-invalid:focus {
   margin-bottom: 0.4rem;
 }
 
+.detail-main {
+  border: 1px solid #dce8e2;
+  border-radius: 0.85rem;
+  background: #fcfffd;
+  padding: 0.62rem;
+}
+
+.detail-side {
+  border: 1px solid #dce8e2;
+  border-radius: 0.85rem;
+  background: #fcfffd;
+  padding: 0.55rem;
+}
+
 .detail-history-box {
   max-height: 58vh;
+}
+
+body.route-inventario {
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body.route-inventario .topbar {
+  flex: 0 0 auto;
+}
+
+body.route-inventario .container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body.route-inventario .inv-page {
+  margin-top: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+body.route-inventario .inv-grid {
+  flex: 1 1 auto;
+}
+
+body.route-inventario #listBox {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+body.route-inventario .detail-history-box {
+  max-height: min(42dvh, 100%);
 }
 
 .input-prefix-wrap {
@@ -800,6 +925,10 @@ select.field-invalid:focus {
   font-size: 0.9rem;
 }
 
+.inv-compact .table th {
+  background: #edf6f2;
+}
+
 .purchase-layout {
   display: grid;
   grid-template-columns: 1.02fr 1.48fr;
@@ -865,6 +994,15 @@ select.field-invalid:focus {
   background: #f1f8f5;
 }
 
+.purchase-product-row-disabled {
+  opacity: 0.62;
+  cursor: not-allowed !important;
+}
+
+.purchase-product-row-disabled:hover {
+  background: inherit;
+}
+
 details {
   border-radius: 0.65rem;
 }
@@ -919,6 +1057,10 @@ summary:focus-visible {
     padding: 0.7rem;
   }
 
+  .action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .inv-grid {
     grid-template-columns: 1fr;
   }
@@ -965,5 +1107,15 @@ summary:focus-visible {
   .actions .btn {
     width: 100%;
     min-width: 0;
+  }
+}
+
+@media (max-width: 80rem) {
+  body.route-inventario #listBox {
+    max-height: none;
+  }
+
+  body.route-inventario .detail-history-box {
+    max-height: min(34dvh, 100%);
   }
 }

@@ -7,13 +7,13 @@
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
+<body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}">
   <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand-wrap">
-        <a class="brand" href="{{ url_for('home') }}">Sociedad gastronómica</a>
-        <span class="brand-sub">Gestión clara y sencilla</span>
+        <a class="brand" href="{{ url_for('home') }}">Sociedad gastronómica Buen Yantar</a>
+        <span class="brand-sub">Gestión</span>
       </div>
 
       {% if session.get("user") %}

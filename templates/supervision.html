@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel page-intro">
+  <h1 class="page-title page-title-left">🧭 Supervisión</h1>
+  <p class="lead">Registro global de acciones de la aplicación con fecha/hora, usuario y acción.</p>
+</section>
+
+<section class="panel">
+  <form method="get" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">🔎 Buscar acción</label>
+        <input class="input" name="q" value="{{ current_q }}" placeholder="Ej: /facturas/nueva o status=200">
+      </div>
+      <div>
+        <label class="label">👤 Usuario</label>
+        <select name="user">
+          <option value="">(Todos)</option>
+          {% for u in user_options %}
+            <option value="{{ u }}" {% if current_user == u %}selected{% endif %}>{{ u }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{{ url_for('supervision') }}">Limpiar</a>
+    </div>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:0.75rem;">
+  {% if not logs %}
+    <div class="empty">No hay registros.</div>
+  {% else %}
+    <div class="inv-scrollbox" style="max-height:72vh;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Fecha y hora</th>
+            <th>Usuario</th>
+            <th>Acción</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in logs %}
+            <tr>
+              <td>{{ row.fecha }}</td>
+              <td>{{ row.usuario }}</td>
+              <td>{{ row.accion }}</td>
+              <td>{{ row.detalle }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>
+
+{% endblock %}
