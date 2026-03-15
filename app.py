@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g
-from datetime import date
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g, Response
+from datetime import date, datetime, timedelta
+import csv
+import io
 import os
 import config
 
@@ -31,8 +33,10 @@ from services.inventory import (
 )
 from services.invoices import (
     INVOICE_HEADERS, INVOICE_LINE_HEADERS,
-    create_invoice, list_invoices, list_invoice_lines
+    create_invoice, list_invoices, list_invoice_lines,
+    find_invoice, list_invoice_lines_for,
 )
+from services.receipt_printer import format_invoice_ticket, print_text_ticket
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -133,6 +137,141 @@ def create_app() -> Flask:
 
         return float(t)
 
+    def safe_float(raw: object) -> float:
+        text = str(raw or "").strip().replace(" ", "")
+        if not text:
+            return 0.0
+        try:
+            return float(text.replace(",", "."))
+        except ValueError:
+            return 0.0
+
+    def parse_iso_datetime(raw: str) -> datetime | None:
+        text = (raw or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def matches_date_window(raw: str, from_date: str, to_date: str) -> bool:
+        if not from_date and not to_date:
+            return True
+
+        parsed = parse_iso_datetime(raw)
+        if not parsed:
+            return False
+
+        value = parsed.date()
+        if from_date:
+            try:
+                if value < date.fromisoformat(from_date):
+                    return False
+            except ValueError:
+                pass
+        if to_date:
+            try:
+                if value > date.fromisoformat(to_date):
+                    return False
+            except ValueError:
+                pass
+        return True
+
+    def make_csv_response(filename: str, headers: list[str], rows: list[dict[str, object]]) -> Response:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in headers})
+
+        response = Response(buffer.getvalue(), mimetype="text/csv; charset=utf-8")
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    def inventory_snapshot() -> dict[str, int]:
+        prods = get_products(config.CSV_PRODUCTOS)
+        stock_map = calc_stock_by_product(config.CSV_MOVS)
+        low_stock = 0
+        infinite = 0
+        groups: set[str] = set()
+
+        for p in prods:
+            groups.add((p.get("grupo") or "Otros").strip() or "Otros")
+            if p.get("stock_infinito", "0") == "1":
+                infinite += 1
+                continue
+            current_stock = stock_map.get(p.get("producto_id", ""), 0.0)
+            stock_min = safe_float(p.get("stock_minimo"))
+            if current_stock < stock_min:
+                low_stock += 1
+
+        return {
+            "total_products": len(prods),
+            "low_stock": low_stock,
+            "infinite_stock": infinite,
+            "groups": len(groups),
+        }
+
+    @app.context_processor
+    def inject_shell_context():
+        nav_items = []
+        if session.get("user"):
+            nav_items = [
+                {
+                    "label": "Inicio",
+                    "href": url_for("home"),
+                    "endpoints": {"home"},
+                },
+                {
+                    "label": "Inventario",
+                    "href": url_for("inventario"),
+                    "endpoints": {"inventario"},
+                },
+                {
+                    "label": "Facturas",
+                    "href": url_for("nueva_factura"),
+                    "endpoints": {"nueva_factura", "nueva_factura_post", "historial_facturas", "imprimir_factura"},
+                },
+                {
+                    "label": "Compras",
+                    "href": url_for("nueva_compra"),
+                    "endpoints": {"nueva_compra", "nueva_compra_post", "historial_compras"},
+                },
+                {
+                    "label": "Usuarios",
+                    "href": url_for("gestion_usuarios"),
+                    "endpoints": {"gestion_usuarios", "cambiar_password", "crear_usuario", "eliminar_usuario"},
+                },
+            ]
+            if getattr(g, "is_admin", False):
+                nav_items.append(
+                    {
+                        "label": "Supervision",
+                        "href": url_for("supervision"),
+                        "endpoints": {"supervision"},
+                    }
+                )
+
+        return {
+            "shell_nav_items": nav_items,
+            "today_label": date.today().strftime("%d/%m/%Y"),
+        }
+
+    def print_invoice_ticket(factura_id: str) -> None:
+        invoice = find_invoice(config.CSV_FACTURAS, factura_id)
+        if not invoice:
+            raise ValueError("Factura no encontrada.")
+
+        lines = list_invoice_lines_for(config.CSV_FACTURA_LINEAS, factura_id)
+        if not lines:
+            raise ValueError("La factura no tiene lineas para imprimir.")
+
+        ticket_text = format_invoice_ticket(invoice, lines)
+        print_text_ticket(ticket_text, config.PRINT_JOBS_DIR)
+
     @app.after_request
     def audit_every_request(response):
         endpoint = (request.endpoint or "").strip()
@@ -177,11 +316,17 @@ def create_app() -> Flask:
         if r:
             return r
         users = list_users(config.CSV_USUARIOS) if user_is_admin() else []
+        user_stats = {
+            "total": len(users),
+            "admins": sum(1 for row in users if (row.get("rol") or "").strip().lower() == "admin"),
+            "normal": sum(1 for row in users if (row.get("rol") or "normal").strip().lower() != "admin"),
+        }
         return render_template(
             "usuarios_gestion.html",
             title="Gestion de usuario",
             is_admin=user_is_admin(),
             users=users,
+            user_stats=user_stats,
         )
 
     @app.post("/usuarios/cambiar_password")
@@ -280,7 +425,79 @@ def create_app() -> Flask:
         r = require_login()
         if r:
             return r
-        return render_template("home.html", title="Pantalla principal")
+
+        snapshot = inventory_snapshot()
+        stock_map = calc_stock_by_product(config.CSV_MOVS)
+        attention_products = []
+        for p in get_products(config.CSV_PRODUCTOS):
+            if p.get("stock_infinito", "0") == "1":
+                continue
+            pid = p.get("producto_id", "")
+            current_stock = stock_map.get(pid, 0.0)
+            stock_min = safe_float(p.get("stock_minimo"))
+            if current_stock >= stock_min:
+                continue
+            attention_products.append({
+                "producto_id": pid,
+                "nombre": p.get("nombre", ""),
+                "grupo": p.get("grupo", "Otros"),
+                "grupo_emoji": p.get("grupo_emoji", "📦"),
+                "stock": current_stock,
+                "stock_minimo": stock_min,
+                "href": url_for("inventario", producto_id=pid, low="1"),
+            })
+        attention_products.sort(key=lambda row: (row["stock"] - row["stock_minimo"], row["nombre"].lower()))
+
+        invoices = list_invoices(config.CSV_FACTURAS, limit=6)
+        if not user_is_admin():
+            me = (session.get("user") or "").strip().lower()
+            invoices = [
+                row for row in invoices
+                if (row.get("usuario") or "").strip().lower() == me
+            ]
+
+        product_names = {
+            p.get("producto_id", ""): p.get("nombre", "")
+            for p in get_products(config.CSV_PRODUCTOS)
+        }
+        tickets, _ = list_purchase_history(
+            config.CSV_MOVS,
+            product_names=product_names,
+            limit=6,
+        )
+
+        recent_activity = []
+        for inv in invoices:
+            recent_activity.append({
+                "kind": "Factura",
+                "icon": "🧾",
+                "title": inv.get("factura_id", ""),
+                "subtitle": inv.get("cliente") or "Sin cliente",
+                "meta": f"{inv.get('lineas') or '0'} lineas · {inv.get('total_importe') or '0.00'} €",
+                "date": (inv.get("fecha") or "")[:10],
+                "sort_key": inv.get("fecha", ""),
+                "href": url_for("historial_facturas", q=inv.get("factura_id", "")),
+            })
+        for ticket in tickets:
+            recent_activity.append({
+                "kind": "Compra",
+                "icon": "🛒",
+                "title": ticket.get("ref_id", ""),
+                "subtitle": ticket.get("proveedor") or "Sin proveedor",
+                "meta": f"{ticket.get('lineas') or '0'} lineas · {ticket.get('total_importe') or '0.00'} €",
+                "date": (ticket.get("fecha") or "")[:10],
+                "sort_key": ticket.get("fecha", ""),
+                "href": url_for("historial_compras", q=ticket.get("ref_id", "")),
+            })
+        recent_activity.sort(key=lambda row: row.get("sort_key", ""), reverse=True)
+
+        return render_template(
+            "home.html",
+            title="Pantalla principal",
+            home_stats=snapshot,
+            recent_activity=recent_activity[:6],
+            attention_products=attention_products[:5],
+        )
 
     # -------- INVENTARIO --------
     @app.get("/inventario")
@@ -339,6 +556,13 @@ def create_app() -> Flask:
             selected_stock = None if sel_inf else stock_map.get(producto_id, 0.0)
             selected_purchases = last_purchases_for_product(config.CSV_MOVS, producto_id, limit=300)
 
+        inventory_summary = {
+            "total_products": len(rows),
+            "low_stock": sum(1 for row in rows if row["bajo_minimo"] == "1"),
+            "infinite_stock": sum(1 for row in rows if row["stock_infinito"] == "1"),
+            "groups": len(group_options),
+        }
+
         return render_template(
             "inventario.html",
             title="Inventario",
@@ -348,6 +572,7 @@ def create_app() -> Flask:
             selected_purchases=selected_purchases,
             group_options=group_options,
             current_filters=current_filters,
+            inventory_summary=inventory_summary,
         )
 
     @app.post("/inventario/nuevo_producto")
@@ -509,6 +734,8 @@ def create_app() -> Flask:
 
         product_options = []
         groups_map = {}
+        low_stock = 0
+        infinite_stock = 0
         for p in prods:
             pid = p.get("producto_id", "")
             unit = p.get("unidad", "ud")
@@ -526,7 +753,13 @@ def create_app() -> Flask:
                 "stock_infinito": "1" if infinito else "0",
                 "stock_actual": current_stock,
                 "precio_unitario": p.get("precio_unitario", ""),
+                "stock_bajo": "1" if (current_stock is not None and current_stock < safe_float(p.get("stock_minimo"))) else "0",
+                "stock_zero": "1" if (current_stock is not None and current_stock <= 0) else "0",
             })
+            if infinito:
+                infinite_stock += 1
+            elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
+                low_stock += 1
         group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
 
         return render_template(
@@ -536,6 +769,12 @@ def create_app() -> Flask:
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
+            form_summary={
+                "total_products": len(product_options),
+                "groups": len(group_options),
+                "low_stock": low_stock,
+                "infinite_stock": infinite_stock,
+            },
         )
 
     @app.post("/facturas/nueva")
@@ -647,6 +886,11 @@ def create_app() -> Flask:
             invoice_date=invoice_date,
             user=session.get("user", ""),
         )
+        try:
+            print_invoice_ticket(factura_id)
+            flash("Factura enviada a la impresora conectada.")
+        except (ValueError, RuntimeError) as exc:
+            flash(f"No se pudo imprimir la factura: {exc}")
         flash(f"Factura registrada ✅ ({len(lines)} líneas, total {total:.2f} €, ref: {factura_id})")
         return redirect_with_list_filters("nueva_factura")
 
@@ -658,6 +902,9 @@ def create_app() -> Flask:
 
         invoices = list_invoices(config.CSV_FACTURAS, limit=400)
         raw_lines = list_invoice_lines(config.CSV_FACTURA_LINEAS)
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
 
         lines_map: dict[str, list[dict[str, str]]] = {}
         for line in raw_lines:
@@ -666,7 +913,7 @@ def create_app() -> Flask:
                 continue
             lines_map.setdefault(fid, []).append(line)
 
-        query = (request.args.get("q") or "").strip().lower()
+        query = current_q.lower()
         if query:
             invoices = [
                 row for row in invoices
@@ -674,6 +921,11 @@ def create_app() -> Flask:
                 or query in (row.get("cliente", "").lower())
                 or query in (row.get("nota_global", "").lower())
                 or query in (row.get("usuario", "").lower())
+            ]
+        if current_from or current_to:
+            invoices = [
+                row for row in invoices
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
             ]
 
         if not user_is_admin():
@@ -683,13 +935,105 @@ def create_app() -> Flask:
                 if (row.get("usuario") or "").strip().lower() == me
             ]
 
+        history_summary = {
+            "count": len(invoices),
+            "amount": sum(safe_float(row.get("total_importe")) for row in invoices),
+            "lines": sum(int((row.get("lineas") or "0").strip() or "0") for row in invoices),
+            "clients": len({(row.get("cliente") or "").strip() for row in invoices if (row.get("cliente") or "").strip()}),
+        }
+
         return render_template(
             "facturas_historial.html",
             title="Historial facturas",
             invoices=invoices,
             lines_map=lines_map,
-            current_q=(request.args.get("q") or "").strip(),
+            current_q=current_q,
+            current_from=current_from,
+            current_to=current_to,
+            history_summary=history_summary,
         )
+
+    @app.get("/facturas/historial/export")
+    def export_historial_facturas():
+        r = require_login()
+        if r:
+            return r
+
+        invoices = list_invoices(config.CSV_FACTURAS, limit=400)
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+
+        query = current_q.lower()
+        if query:
+            invoices = [
+                row for row in invoices
+                if query in (row.get("factura_id", "").lower())
+                or query in (row.get("cliente", "").lower())
+                or query in (row.get("nota_global", "").lower())
+                or query in (row.get("usuario", "").lower())
+            ]
+        if current_from or current_to:
+            invoices = [
+                row for row in invoices
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
+        if not user_is_admin():
+            me = (session.get("user") or "").strip().lower()
+            invoices = [
+                row for row in invoices
+                if (row.get("usuario") or "").strip().lower() == me
+            ]
+
+        rows = [
+            {
+                "fecha": row.get("fecha", ""),
+                "factura_id": row.get("factura_id", ""),
+                "cliente": row.get("cliente", ""),
+                "usuario": row.get("usuario", ""),
+                "lineas": row.get("lineas", ""),
+                "total_importe": row.get("total_importe", ""),
+                "nota_global": row.get("nota_global", ""),
+            }
+            for row in invoices
+        ]
+        return make_csv_response(
+            "facturas_filtradas.csv",
+            ["fecha", "factura_id", "cliente", "usuario", "lineas", "total_importe", "nota_global"],
+            rows,
+        )
+
+    @app.post("/facturas/<factura_id>/imprimir")
+    def imprimir_factura(factura_id: str):
+        r = require_login()
+        if r:
+            return r
+
+        redirect_params = {}
+        for key in ("q", "from", "to"):
+            value = (request.form.get(key) or "").strip()
+            if value:
+                redirect_params[key] = value
+
+        invoice = find_invoice(config.CSV_FACTURAS, factura_id)
+        if not invoice:
+            flash("Factura no encontrada.")
+            return redirect(url_for("historial_facturas", **redirect_params))
+
+        if not user_is_admin():
+            me = (session.get("user") or "").strip().lower()
+            owner = (invoice.get("usuario") or "").strip().lower()
+            if owner != me:
+                flash("No puedes imprimir facturas de otro usuario.")
+                return redirect(url_for("historial_facturas", **redirect_params))
+
+        try:
+            print_invoice_ticket(factura_id)
+            flash(f"Factura {factura_id} enviada a la impresora.")
+        except (ValueError, RuntimeError) as exc:
+            flash(f"No se pudo imprimir la factura {factura_id}: {exc}")
+
+        return redirect(url_for("historial_facturas", **redirect_params))
 
     @app.get("/compras/historial")
     def historial_compras():
@@ -704,8 +1048,11 @@ def create_app() -> Flask:
             product_names=product_names,
             limit=500,
         )
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
 
-        query = (request.args.get("q") or "").strip().lower()
+        query = current_q.lower()
         if query:
             filtered = []
             for t in tickets:
@@ -716,13 +1063,77 @@ def create_app() -> Flask:
                 ):
                     filtered.append(t)
             tickets = filtered
+        if current_from or current_to:
+            tickets = [
+                t for t in tickets
+                if matches_date_window(t.get("fecha", ""), current_from, current_to)
+            ]
+
+        history_summary = {
+            "count": len(tickets),
+            "amount": sum(safe_float(t.get("total_importe")) for t in tickets),
+            "units": sum(safe_float(t.get("unidades")) for t in tickets),
+            "providers": len({(t.get("proveedor") or "").strip() for t in tickets if (t.get("proveedor") or "").strip()}),
+        }
 
         return render_template(
             "compras_historial.html",
             title="Historial compras",
             tickets=tickets,
             lines_map=lines_map,
-            current_q=(request.args.get("q") or "").strip(),
+            current_q=current_q,
+            current_from=current_from,
+            current_to=current_to,
+            history_summary=history_summary,
+        )
+
+    @app.get("/compras/historial/export")
+    def export_historial_compras():
+        r = require_login()
+        if r:
+            return r
+
+        prods = get_products(config.CSV_PRODUCTOS)
+        product_names = {p.get("producto_id", ""): p.get("nombre", "") for p in prods}
+        tickets, _ = list_purchase_history(
+            config.CSV_MOVS,
+            product_names=product_names,
+            limit=500,
+        )
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+
+        query = current_q.lower()
+        if query:
+            tickets = [
+                t for t in tickets
+                if query in (t.get("ref_id", "").lower())
+                or query in (t.get("proveedor", "").lower())
+                or query in (t.get("usuario", "").lower())
+            ]
+        if current_from or current_to:
+            tickets = [
+                t for t in tickets
+                if matches_date_window(t.get("fecha", ""), current_from, current_to)
+            ]
+
+        rows = [
+            {
+                "fecha": row.get("fecha", ""),
+                "ref_id": row.get("ref_id", ""),
+                "proveedor": row.get("proveedor", ""),
+                "usuario": row.get("usuario", ""),
+                "lineas": row.get("lineas", ""),
+                "unidades": row.get("unidades", ""),
+                "total_importe": row.get("total_importe", ""),
+            }
+            for row in tickets
+        ]
+        return make_csv_response(
+            "compras_filtradas.csv",
+            ["fecha", "ref_id", "proveedor", "usuario", "lineas", "unidades", "total_importe"],
+            rows,
         )
 
     @app.get("/supervision")
@@ -733,8 +1144,12 @@ def create_app() -> Flask:
 
         all_logs = list_logs(config.CSV_LOGS, limit=2000)
         logs = list(all_logs)
-        q = (request.args.get("q") or "").strip().lower()
-        user = (request.args.get("user") or "").strip().lower()
+        current_q = (request.args.get("q") or "").strip()
+        current_user = (request.args.get("user") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+        q = current_q.lower()
+        user = current_user.lower()
 
         if q:
             logs = [
@@ -743,15 +1158,81 @@ def create_app() -> Flask:
             ]
         if user:
             logs = [row for row in logs if user in (row.get("usuario", "").lower())]
+        if current_from or current_to:
+            logs = [
+                row for row in logs
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
 
         users = sorted({(row.get("usuario") or "").strip() for row in all_logs if (row.get("usuario") or "").strip()})
+        cutoff = datetime.now() - timedelta(hours=24)
+        recent_logs = 0
+        error_logs = 0
+        for row in logs:
+            detail = (row.get("detalle") or "").lower()
+            if "status=4" in detail or "status=5" in detail:
+                error_logs += 1
+            parsed = parse_iso_datetime(row.get("fecha", ""))
+            if parsed and parsed >= cutoff:
+                recent_logs += 1
+
         return render_template(
             "supervision.html",
             title="Supervision",
             logs=logs,
-            current_q=(request.args.get("q") or "").strip(),
-            current_user=(request.args.get("user") or "").strip(),
+            current_q=current_q,
+            current_user=current_user,
+            current_from=current_from,
+            current_to=current_to,
             user_options=users,
+            log_summary={
+                "shown": len(logs),
+                "users": len({(row.get("usuario") or "").strip() for row in logs if (row.get("usuario") or "").strip()}),
+                "recent": recent_logs,
+                "errors": error_logs,
+            },
+        )
+
+    @app.get("/supervision/export")
+    def export_supervision():
+        r = require_admin()
+        if r:
+            return r
+
+        logs = list(list_logs(config.CSV_LOGS, limit=2000))
+        current_q = (request.args.get("q") or "").strip()
+        current_user = (request.args.get("user") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+        q = current_q.lower()
+        user = current_user.lower()
+
+        if q:
+            logs = [
+                row for row in logs
+                if q in (row.get("accion", "").lower()) or q in (row.get("detalle", "").lower())
+            ]
+        if user:
+            logs = [row for row in logs if user in (row.get("usuario", "").lower())]
+        if current_from or current_to:
+            logs = [
+                row for row in logs
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
+
+        rows = [
+            {
+                "fecha": row.get("fecha", ""),
+                "usuario": row.get("usuario", ""),
+                "accion": row.get("accion", ""),
+                "detalle": row.get("detalle", ""),
+            }
+            for row in logs
+        ]
+        return make_csv_response(
+            "supervision_filtrada.csv",
+            ["fecha", "usuario", "accion", "detalle"],
+            rows,
         )
 
     @app.get("/compra/nueva")
@@ -767,6 +1248,8 @@ def create_app() -> Flask:
 
         product_options = []
         groups_map = {}
+        low_stock = 0
+        infinite_stock = 0
         for p in prods:
             pid = p.get("producto_id", "")
             unit = p.get("unidad", "ud")
@@ -783,7 +1266,13 @@ def create_app() -> Flask:
                 "grupo_emoji": group_emoji,
                 "stock_infinito": "1" if infinito else "0",
                 "stock_actual": current_stock,
+                "stock_bajo": "1" if (current_stock is not None and current_stock < safe_float(p.get("stock_minimo"))) else "0",
+                "stock_zero": "1" if (current_stock is not None and current_stock <= 0) else "0",
             })
+            if infinito:
+                infinite_stock += 1
+            elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
+                low_stock += 1
         group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
 
         return render_template(
@@ -793,6 +1282,12 @@ def create_app() -> Flask:
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
+            form_summary={
+                "total_products": len(product_options),
+                "groups": len(group_options),
+                "low_stock": low_stock,
+                "infinite_stock": infinite_stock,
+            },
         )
 
     @app.post("/compra/nueva")

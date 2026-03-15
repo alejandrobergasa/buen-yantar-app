@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
-
-<section class="panel page-intro">
-  <h1 class="page-title page-title-left">🧭 Supervisión</h1>
-  <p class="lead">Registro global de acciones de la aplicación con fecha/hora, usuario y acción.</p>
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Supervision</h1>
+  </div>
 </section>
 
 <section class="panel">
   <form method="get" class="form">
     <div class="grid-2">
       <div>
-        <label class="label">🔎 Buscar acción</label>
+        <label class="label">Buscar accion</label>
         <input class="input" name="q" value="{{ current_q }}" placeholder="Ej: /facturas/nueva o status=200">
       </div>
       <div>
-        <label class="label">👤 Usuario</label>
+        <label class="label">Usuario</label>
         <select name="user">
           <option value="">(Todos)</option>
           {% for u in user_options %}
@@ -23,16 +23,27 @@
         </select>
       </div>
     </div>
+    <div class="grid-2">
+      <div>
+        <label class="label">Desde</label>
+        <input class="input" type="date" name="from" value="{{ current_from }}">
+      </div>
+      <div>
+        <label class="label">Hasta</label>
+        <input class="input" type="date" name="to" value="{{ current_to }}">
+      </div>
+    </div>
     <div class="actions">
       <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="{{ url_for('supervision') }}">Limpiar</a>
     </div>
   </form>
 </section>
 
-<section class="panel" style="margin-top:0.75rem;">
+<section class="panel table-card">
   {% if not logs %}
-    <div class="empty">No hay registros.</div>
+    <div class="empty">No hay registros para los filtros actuales.</div>
   {% else %}
     <div class="inv-scrollbox" style="max-height:72vh;">
       <table class="table">
@@ -40,16 +51,28 @@
           <tr>
             <th>Fecha y hora</th>
             <th>Usuario</th>
-            <th>Acción</th>
+            <th>Accion</th>
+            <th>Estado</th>
             <th>Detalle</th>
           </tr>
         </thead>
         <tbody>
           {% for row in logs %}
+            {% set detail = (row.detalle or '') %}
+            {% set detail_lower = detail.lower() %}
             <tr>
               <td>{{ row.fecha }}</td>
               <td>{{ row.usuario }}</td>
               <td>{{ row.accion }}</td>
+              <td>
+                {% if 'status=5' in detail_lower %}
+                  <span class="badge badge-danger">5xx</span>
+                {% elif 'status=4' in detail_lower %}
+                  <span class="badge badge-warn">4xx</span>
+                {% else %}
+                  <span class="badge badge-ok">OK</span>
+                {% endif %}
+              </td>
               <td>{{ row.detalle }}</td>
             </tr>
           {% endfor %}
@@ -58,5 +81,4 @@
     </div>
   {% endif %}
 </section>
-
 {% endblock %}

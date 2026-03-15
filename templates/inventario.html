@@ -1,50 +1,49 @@
 {% extends "base.html" %}
 {% block content %}
-
-<section class="inv-page-head">
-  <h1 class="page-title page-title-left">📦 Inventario</h1>
-  <p class="lead">Busca rápido, revisa estado de stock y edita el producto seleccionado.</p>
-</section>
-
 <div class="inv-page inv-compact">
-
   <div class="inv-grid">
-    <!-- COLUMNA 1: LISTADO -->
     <section class="inv-col">
       <div class="panel inv-panel">
-        <h2 class="panel-title">Listado de productos ({{ products_table|length }})</h2>
+        <div class="section-head compact-head">
+          <h2 class="section-heading">Productos</h2>
+          <div class="inv-legend">
+            <span class="header-count" id="visibleProductsCount">{{ products_table|length }}</span>
+            <span class="badge">Estado</span>
+            <span class="product-state state-ok">OK</span>
+            <span class="product-state state-low">BAJO</span>
+            <span class="product-state state-zero">0</span>
+            <span class="product-state state-inf">INF</span>
+          </div>
+        </div>
 
-        <!-- Filtros: 2 columnas en la misma fila -->
         <div class="inv-filters">
           <div>
-            <label class="label">🔎 Buscar</label>
-            <input id="searchBox" class="input" placeholder="Escribe nombre del producto">
+            <label class="label" for="searchBox">Buscar producto</label>
+            <input id="searchBox" class="input" placeholder="Escribe nombre del producto" value="{{ current_filters.q }}">
           </div>
 
           <div class="inv-filters-right">
-            <label class="label">🧩 Grupo</label>
-            <select id="groupFilter">
-              <option value="">(Todos)</option>
-              {% for g, e in group_options %}
-                <option value="{{ g }}">{{ e }} {{ g }}</option>
-              {% endfor %}
-            </select>
+            <div>
+              <label class="label" for="groupFilter">Grupo</label>
+              <select id="groupFilter">
+                <option value="">(Todos)</option>
+                {% for g, e in group_options %}
+                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+                {% endfor %}
+              </select>
+            </div>
 
             <label class="inv-check">
-              <input id="onlyLow" type="checkbox">
-              <span>⚠️ Solo bajo reserva</span>
+              <input id="onlyLow" type="checkbox" {% if current_filters.low == "1" %}checked{% endif %}>
+              <span>Mostrar solo bajo reserva</span>
             </label>
           </div>
         </div>
-        <div class="inv-legend">
-          <span class="badge">Estado:</span>
-          <span class="product-state state-ok">OK</span>
-          <span class="product-state state-low">BAJO</span>
-          <span class="product-state state-zero">0</span>
-          <span class="product-state state-inf">INF</span>
+
+        <div class="toolbar-inline actions-end">
+          <button class="btn btn-secondary btn-small" id="inventoryClearFilters" type="button">Limpiar filtros</button>
         </div>
 
-        <!-- Lista con scroll interno -->
         <div class="inv-scrollbox" id="listBox">
           <table class="table">
             <thead>
@@ -79,7 +78,6 @@
                         <span class="product-state state-ok">OK</span>
                       {% endif %}
                     </div>
-                    <div class="product-row-meta">{{ r.grupo_emoji }} {{ r.grupo }} · Unidad: {{ r.unidad }}</div>
                   </td>
 
                   <td class="right">
@@ -97,100 +95,99 @@
               {% endfor %}
             </tbody>
           </table>
-        </div>
 
-        <!-- Botón crear nuevo producto -->
-        <div class="inv-create-actions">
-          {% if g.is_admin %}
-            <button class="btn btn-primary" type="button" onclick="toggleNewProduct(true)">➕ Nuevo producto</button>
-          {% else %}
-            <div class="help">Solo administradores pueden crear productos.</div>
-          {% endif %}
+          <div class="empty inventory-no-results" id="inventoryNoResults" hidden>No hay productos que coincidan con los filtros actuales.</div>
         </div>
-
       </div>
     </section>
 
-    <!-- COLUMNA 2: DETALLE -->
     <section class="inv-col">
       <div class="panel inv-panel">
-        <h2 class="panel-title" id="detailTitle">🔎 Detalle</h2>
+        <div class="section-head compact-head">
+          <h2 class="section-heading" id="detailTitle">Detalle</h2>
+        </div>
 
         <div class="inv-detail-scroll">
           <div id="newProductMiddleBox" class="inv-newbox" style="display:none;">
-            <h3 class="inv-newbox-title">➕ Crear producto</h3>
+            <h3 class="inv-newbox-title">Crear producto</h3>
 
             <form method="post" action="{{ url_for('inventario_nuevo_producto') }}" class="form" id="newProdForm">
               <input type="hidden" name="f_q" value="{{ current_filters.q }}">
               <input type="hidden" name="f_g" value="{{ current_filters.g }}">
               <input type="hidden" name="f_low" value="{{ current_filters.low }}">
-              <label class="label">📌 Nombre</label>
+              <label class="label">Nombre</label>
               <input class="input js-live-field" name="nombre" data-rule="required" required>
 
               <div class="grid-2">
                 <div>
-                  <label class="label">💶 Precio / unidad</label>
+                  <label class="label">Precio / unidad</label>
                   <input class="input js-live-field" name="precio_unitario" data-rule="number" placeholder="Ej: 1.20">
                 </div>
                 <div>
-                  <label class="label">📏 Unidad</label>
+                  <label class="label">Unidad</label>
                   <input class="input js-live-field" name="unidad" data-rule="required" value="ud" placeholder="ud / kg / l">
                 </div>
               </div>
 
               <div class="grid-2">
                 <div>
-                  <label class="label">🛟 Mínimo reserva</label>
+                  <label class="label">Minimo de reserva</label>
                   <input class="input js-live-field" name="stock_minimo" data-rule="number" value="0">
                 </div>
                 <div>
-                  <label class="label">📦 Stock actual</label>
+                  <label class="label">Stock actual</label>
                   <input class="input js-live-field" name="stock_actual" data-rule="required-number-when-finite" placeholder="Ej: 20">
                 </div>
               </div>
 
               <div class="grid-2">
                 <div>
-                  <label class="label">🧩 Grupo</label>
+                  <label class="label">Grupo</label>
                   <select class="input js-live-field" name="grupo_select" id="grupoSelect" data-rule="required">
                     {% for g, e in group_options %}
                       <option value="{{ g }}" data-emoji="{{ e }}">{{ e }} {{ g }}</option>
                     {% endfor %}
-                    <option value="__new__">➕ Nuevo grupo…</option>
+                    <option value="__new__">Nuevo grupo...</option>
                   </select>
                 </div>
               </div>
 
-              <!-- Campos para grupo nuevo (ocultos por defecto) -->
               <div id="newGroupFields" style="display:none;">
                 <div class="grid-2">
                   <div>
-                    <label class="label">🧩 Nombre grupo (nuevo)</label>
+                    <label class="label">Nombre del grupo</label>
                     <input class="input js-live-field" name="grupo_custom" data-rule="required-when-new-group" placeholder="Ej: Verduras">
                   </div>
                   <div>
-                    <label class="label">😀 Emoji grupo (nuevo)</label>
-                    <input class="input js-live-field" name="grupo_emoji_custom" data-rule="required-when-new-group" placeholder="Ej: 🥬">
+                    <label class="label">Emoji del grupo</label>
+                    <input type="hidden" class="js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group">
+                    <div class="emoji-picker" id="groupEmojiPicker">
+                      <button class="input emoji-picker-trigger" type="button" id="groupEmojiTrigger" aria-expanded="false" aria-controls="groupEmojiMenu">
+                        <span class="emoji-picker-value" id="groupEmojiValue">Selecciona un emoji</span>
+                      </button>
+                      <div class="emoji-picker-menu" id="groupEmojiMenu" hidden>
+                        <div class="emoji-picker-scroll" id="groupEmojiScroll"></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="help">Si eliges “Nuevo grupo…”, rellena estos dos campos.</div>
               </div>
 
               <label class="inv-check">
                 <input type="checkbox" name="stock_infinito">
-                <span>♾️ Stock infinito (no depende de stock)</span>
+                <span>Stock infinito</span>
               </label>
 
               <div class="actions">
-                <button class="btn btn-primary" type="submit">✅ Crear</button>
-                <button class="btn btn-secondary" type="button" onclick="toggleNewProduct(false)">↩️ Cancelar</button>
+                <button class="btn btn-primary" type="submit">Crear producto</button>
+                <button class="btn btn-secondary" type="button" onclick="toggleNewProduct(false)">Cancelar</button>
               </div>
             </form>
           </div>
 
           <div id="productDetailBox">
             {% if not selected %}
-              <div class="empty">Selecciona un producto del listado para ver su información completa.</div>
+              <div class="empty">Selecciona un producto del listado para ver su informacion completa.</div>
             {% else %}
               {% set is_inf = (selected.stock_infinito == "1") %}
               {% set minv = (selected.stock_minimo | float) %}
@@ -205,11 +202,11 @@
                     <input type="hidden" name="f_low" value="{{ current_filters.low }}">
                     <div class="grid-2">
                       <div>
-                        <label class="label">📌 Nombre</label>
+                        <label class="label">Nombre</label>
                         <input class="input js-detail-input" name="nombre" value="{{ selected.nombre }}" disabled required>
                       </div>
                       <div>
-                        <label class="label">🧩 Grupo</label>
+                        <label class="label">Grupo</label>
                         <div class="input-prefix-wrap">
                           <span class="input-prefix">{{ selected.grupo_emoji }}</span>
                           <input class="input input-prefixed js-detail-input" name="grupo" value="{{ selected.grupo }}" disabled>
@@ -219,61 +216,34 @@
 
                     <div class="grid-2">
                       <div>
-                        <label class="label">📦 Stock actual</label>
+                        <label class="label">Stock actual</label>
                         {% if is_inf %}
-                          <input
-                            class="input input-num input-na js-detail-input js-stock-current"
-                            name="stock_actual"
-                            value="No aplica"
-                            disabled
-                          >
+                          <input class="input input-num input-na js-detail-input js-stock-current" name="stock_actual" value="No aplica" disabled>
                         {% else %}
                           {% if st >= minv %}
-                            <input
-                              class="input input-num js-detail-input js-stock-current stock-current-ok"
-                              name="stock_actual"
-                              value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}"
-                              disabled
-                            >
+                            <input class="input input-num js-detail-input js-stock-current stock-current-ok" name="stock_actual" value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}" disabled>
                           {% else %}
-                            <input
-                              class="input input-num js-detail-input js-stock-current stock-current-low"
-                              name="stock_actual"
-                              value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}"
-                              disabled
-                            >
+                            <input class="input input-num js-detail-input js-stock-current stock-current-low" name="stock_actual" value="{% if (st % 1) == 0 %}{{ "%.0f"|format(st) }}{% else %}{{ "%.2f"|format(st) }}{% endif %}" disabled>
                           {% endif %}
                         {% endif %}
                       </div>
                       <div>
-                        <label class="label">🛟 Stock reserva</label>
+                        <label class="label">Stock de reserva</label>
                         {% if is_inf %}
-                          <input
-                            class="input input-num input-na js-detail-input js-stock-min"
-                            name="stock_minimo"
-                            value="No aplica"
-                            data-real="{{ selected.stock_minimo }}"
-                            disabled
-                          >
+                          <input class="input input-num input-na js-detail-input js-stock-min" name="stock_minimo" value="No aplica" data-real="{{ selected.stock_minimo }}" disabled>
                         {% else %}
-                          <input
-                            class="input input-num js-detail-input js-stock-min"
-                            name="stock_minimo"
-                            value="{{ selected.stock_minimo }}"
-                            data-real="{{ selected.stock_minimo }}"
-                            disabled
-                          >
+                          <input class="input input-num js-detail-input js-stock-min" name="stock_minimo" value="{{ selected.stock_minimo }}" data-real="{{ selected.stock_minimo }}" disabled>
                         {% endif %}
                       </div>
                     </div>
 
                     <div class="grid-2">
                       <div>
-                        <label class="label">📏 Unidad</label>
+                        <label class="label">Unidad</label>
                         <input class="input js-detail-input" name="unidad" value="{{ selected.unidad }}" disabled>
                       </div>
                       <div>
-                        <label class="label">💶 Precio / unidad</label>
+                        <label class="label">Precio / unidad</label>
                         <input class="input input-num js-detail-input js-eur-input" name="precio_unitario" value="{{ selected.precio_unitario }}" disabled>
                       </div>
                     </div>
@@ -282,16 +252,16 @@
 
                     <label class="inv-check">
                       <input type="checkbox" class="js-detail-input js-stock-inf-detail" name="stock_infinito" {% if is_inf %}checked{% endif %} disabled>
-                      <span>♾️ Stock infinito</span>
+                      <span>Stock infinito</span>
                     </label>
 
                     <div class="actions" id="detailActionsView">
-                      <button class="btn btn-primary" type="button" id="btnEditDetail">✏️ Editar producto</button>
+                      <button class="btn btn-primary" type="button" id="btnEditDetail">Editar producto</button>
                     </div>
 
                     <div class="actions" id="detailActionsEdit" style="display:none;">
-                      <button class="btn btn-primary" type="submit">💾 Guardar cambios</button>
-                      <button class="btn btn-secondary" type="button" id="btnCancelDetail">↩️ Cancelar cambios</button>
+                      <button class="btn btn-primary" type="submit">Guardar cambios</button>
+                      <button class="btn btn-secondary" type="button" id="btnCancelDetail">Cancelar cambios</button>
                       {% if g.is_admin %}
                         <button
                           id="btnDeleteDetail"
@@ -301,7 +271,7 @@
                           formmethod="post"
                           onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
                         >
-                          🗑️ Eliminar producto
+                          Eliminar producto
                         </button>
                       {% endif %}
                     </div>
@@ -309,10 +279,10 @@
                 </div>
 
                 <aside class="detail-side">
-                  <h3 class="panel-title detail-side-title">🧾 Historial compras</h3>
+                  <h3 class="panel-title detail-side-title">Compras</h3>
                   <div class="inv-scrollbox detail-history-box">
                     {% if not selected_purchases %}
-                      <div class="empty">No hay compras registradas.</div>
+                      <div class="empty">No hay compras registradas para este producto.</div>
                     {% else %}
                       <table class="table">
                         <thead>
@@ -340,13 +310,17 @@
           </div>
         </div>
 
+        {% if g.is_admin %}
+        <div class="actions actions-end">
+          <button class="btn btn-primary btn-small" type="button" id="inventoryNewProductBtn" onclick="toggleNewProduct(true)">Nuevo producto</button>
+        </div>
+        {% endif %}
       </div>
     </section>
   </div>
 </div>
 
 <script>
-  // --- Normaliza texto (tildes/espacios/mayúsculas) ---
   function normalizeText(s) {
     return (s || "")
       .toString()
@@ -356,54 +330,60 @@
       .toLowerCase();
   }
 
-  // --- Mostrar/ocultar nuevo producto ---
-  function toggleNewProduct(show){
+  function toggleNewProduct(show) {
     const box = document.getElementById("newProductMiddleBox");
     const detailBox = document.getElementById("productDetailBox");
     const detailTitle = document.getElementById("detailTitle");
 
     box.style.display = show ? "block" : "none";
     detailBox.style.display = show ? "none" : "block";
-    detailTitle.textContent = show ? "➕ Nuevo producto" : "🔎 Detalle";
+    detailTitle.textContent = show ? "Crear producto" : "Detalle";
+    if (show) {
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
-  // --- Filtros en vivo ---
   const searchBox = document.getElementById("searchBox");
   const groupFilter = document.getElementById("groupFilter");
   const onlyLow = document.getElementById("onlyLow");
   const rows = Array.from(document.querySelectorAll("#productsTbody tr"));
-  const urlParams = new URLSearchParams(window.location.search);
+  const visibleProductsCount = document.getElementById("visibleProductsCount");
+  const noResultsBox = document.getElementById("inventoryNoResults");
+  const clearFiltersBtn = document.getElementById("inventoryClearFilters");
 
-  if(urlParams.has("q")){
-    searchBox.value = urlParams.get("q") || "";
-  }
-  if(urlParams.has("g")){
-    groupFilter.value = urlParams.get("g") || "";
-  }
-  if(urlParams.get("low") === "1"){
-    onlyLow.checked = true;
-  }
-
-  // --- Clic en toda la fila (preserva filtros actuales) ---
-  function navigateToProductRow(tr){
-    const base = tr.getAttribute("data-href");
-    const next = new URL(base, window.location.origin);
-
+  function syncFilterState() {
+    const next = new URL(window.location.href);
     const q = (searchBox.value || "").trim();
     const g = (groupFilter.value || "").trim();
     const low = !!onlyLow.checked;
 
-    if(q){ next.searchParams.set("q", q); }
-    else { next.searchParams.delete("q"); }
-    if(g){ next.searchParams.set("g", g); }
-    else { next.searchParams.delete("g"); }
-    if(low){ next.searchParams.set("low", "1"); }
-    else { next.searchParams.delete("low"); }
+    if (q) next.searchParams.set("q", q);
+    else next.searchParams.delete("q");
+
+    if (g) next.searchParams.set("g", g);
+    else next.searchParams.delete("g");
+
+    if (low) next.searchParams.set("low", "1");
+    else next.searchParams.delete("low");
+
+    history.replaceState(null, "", `${next.pathname}${next.search}`);
+  }
+
+  function navigateToProductRow(tr) {
+    const base = tr.getAttribute("data-href");
+    const next = new URL(base, window.location.origin);
+    const q = (searchBox.value || "").trim();
+    const g = (groupFilter.value || "").trim();
+    const low = !!onlyLow.checked;
+
+    if (q) next.searchParams.set("q", q);
+    if (g) next.searchParams.set("g", g);
+    if (low) next.searchParams.set("low", "1");
 
     window.location.href = next.pathname + next.search;
   }
 
-  document.querySelectorAll("tr[data-href]").forEach(tr => {
+  document.querySelectorAll("tr[data-href]").forEach((tr) => {
     tr.addEventListener("click", () => navigateToProductRow(tr));
     tr.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -417,48 +397,146 @@
     const q = normalizeText(searchBox.value);
     const g = (groupFilter.value || "").trim();
     const lowOnly = !!onlyLow.checked;
+    let visible = 0;
 
-    rows.forEach(tr => {
+    rows.forEach((tr) => {
       const name = normalizeText(tr.getAttribute("data-name"));
       const group = (tr.getAttribute("data-group") || "").trim();
       const low = (tr.getAttribute("data-low") || "0") === "1";
-
       const okText = (q === "") || name.includes(q);
       const okGroup = (g === "") || (group === g);
       const okLow = (!lowOnly) || low;
+      const isVisible = okText && okGroup && okLow;
 
-      tr.style.display = (okText && okGroup && okLow) ? "" : "none";
+      tr.style.display = isVisible ? "" : "none";
+      if (isVisible) visible += 1;
     });
+
+    visibleProductsCount.textContent = String(visible);
+    noResultsBox.hidden = visible !== 0;
   }
 
-  searchBox.addEventListener("input", applyFilters);
-  groupFilter.addEventListener("change", applyFilters);
-  onlyLow.addEventListener("change", applyFilters);
+  searchBox.addEventListener("input", () => {
+    applyFilters();
+    syncFilterState();
+  });
+  groupFilter.addEventListener("change", () => {
+    applyFilters();
+    syncFilterState();
+  });
+  onlyLow.addEventListener("change", () => {
+    applyFilters();
+    syncFilterState();
+  });
+  clearFiltersBtn.addEventListener("click", () => {
+    searchBox.value = "";
+    groupFilter.value = "";
+    onlyLow.checked = false;
+    applyFilters();
+    syncFilterState();
+  });
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement && document.activeElement.tagName || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select";
+    if (e.key === "/" && !typing) {
+      e.preventDefault();
+      searchBox.focus();
+      searchBox.select();
+    }
+    if (e.key === "Escape" && !typing && (((searchBox.value || "").trim()) || ((groupFilter.value || "").trim()) || onlyLow.checked)) {
+      searchBox.value = "";
+      groupFilter.value = "";
+      onlyLow.checked = false;
+      applyFilters();
+      syncFilterState();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+      const createBtn = document.getElementById("inventoryNewProductBtn");
+      if (createBtn) {
+        e.preventDefault();
+        toggleNewProduct(true);
+      }
+    }
+  });
   applyFilters();
 
-  // --- Alta: grupo existente vs nuevo grupo ---
   const grupoSelect = document.getElementById("grupoSelect");
   const newGroupFields = document.getElementById("newGroupFields");
   const stockInfinitoCheckbox = document.querySelector('#newProdForm input[name="stock_infinito"]');
   const stockActualInput = document.querySelector('#newProdForm input[name="stock_actual"]');
+  const groupEmojiInput = document.getElementById("groupEmojiInput");
+  const groupEmojiTrigger = document.getElementById("groupEmojiTrigger");
+  const groupEmojiValue = document.getElementById("groupEmojiValue");
+  const groupEmojiMenu = document.getElementById("groupEmojiMenu");
+  const groupEmojiScroll = document.getElementById("groupEmojiScroll");
+  const EMOJI_GROUPS = [
+    { color: "Rojo", emojis: ["🍎", "🍓", "🍒", "🍅", "🌹", "🌺", "🥩", "🎈", "🚗", "📕", "🎒", "🎸", "🔴", "❤", "💋", "🏓", "🥊", "🦀"] },
+    { color: "Naranja", emojis: ["🍊", "🍑", "🥕", "🧅", "🦊", "🐅", "🦁", "🏀", "🏺", "🥐", "📙", "🔶", "🍂", "🎃", "🦐", "🎻"] },
+    { color: "Amarillo", emojis: ["🍋", "🍌", "🌕", "⭐", "🌟", "🌻", "🌼", "🐤", "🐥", "🧀", "🍯", "🌽", "🔔", "🔑", "💡", "📒", "🍺", "🍟", "🚕", "📀"] },
+    { color: "Verde", emojis: ["🥬", "🥒", "🍏", "🍐", "🍀", "🌿", "🌲", "🌳", "🐢", "🐍", "🦎", "🥦", "📗", "🥗", "🚜", "🔋"] },
+    { color: "Azul", emojis: ["🐟", "🐬", "🐳", "🦋", "🌊", "☔", "📘", "🔷", "🚙", "📫", "📷", "⌚", "🎽", "🧢", "❄", "💧"] },
+    { color: "Morado", emojis: ["🍇", "🍆", "🔮", "👾", "😈", "📔", "🎵", "🎭", "🦄", "🎆", "🍬", "📿", "☂", "🎼", "🦑"] },
+    { color: "Rosa", emojis: ["🌸", "🌷", "🎀", "🐷", "💗", "💖", "💝", "🍥", "🍧", "🧁", "🍬", "🎂", "🍨", "👚", "💞", "🎟"] },
+    { color: "Marron", emojis: ["🥔", "🍞", "🥖", "🍪", "🍫", "☕", "🐻", "📦", "🥜", "🍄", "🐌", "🏈", "👜", "🪑", "🎻", "🧸"] },
+    { color: "Blanco", emojis: ["🥚", "🥛", "🍚", "🍽", "🧂", "🧄", "☁", "⚪", "📄", "🍙", "🍨", "🍼", "🛁", "🕯", "🐚", "🦢"] },
+    { color: "Negro", emojis: ["🎩", "🐈", "🐜", "🎱", "♠", "♣", "🖥", "🎤", "⚫", "📞", "🎬", "🧳", "🐦", "🌑", "🦇", "🖱"] },
+    { color: "Multicolor", emojis: ["🌈", "🥤", "🍷", "🍸", "🍹", "🍰", "🍕", "🍔", "🍜", "🍣", "🍭", "🎨", "🎉", "🛒", "🧹", "🎁", "🎯", "🎲", "🎪", "🎊"] },
+  ];
 
-  function syncGroupUI(){
-    const val = grupoSelect.value;
+  function renderEmojiPicker() {
+    if (!groupEmojiScroll) return;
+    groupEmojiScroll.innerHTML = "";
 
-    if(val === "__new__"){
-      newGroupFields.style.display = "block";
-    } else {
-      newGroupFields.style.display = "none";
+    EMOJI_GROUPS.forEach((group) => {
+      const section = document.createElement("section");
+      section.className = "emoji-group";
+
+      const title = document.createElement("div");
+      title.className = "emoji-group-title";
+      title.textContent = group.color;
+      section.appendChild(title);
+
+      const grid = document.createElement("div");
+      grid.className = "emoji-picker-grid";
+
+      group.emojis.forEach((emoji) => {
+        const button = document.createElement("button");
+        button.className = "emoji-option";
+        button.type = "button";
+        button.dataset.emoji = emoji;
+        button.setAttribute("aria-label", `Elegir ${emoji}`);
+        button.textContent = emoji;
+        button.addEventListener("click", () => {
+          if (groupEmojiInput) {
+            groupEmojiInput.value = button.dataset.emoji || "";
+          }
+          updateEmojiPickerUI();
+          refreshValidation();
+          closeEmojiPicker();
+        });
+        grid.appendChild(button);
+      });
+
+      section.appendChild(grid);
+      groupEmojiScroll.appendChild(section);
+    });
+  }
+
+  function syncGroupUI() {
+    const isNewGroup = grupoSelect.value === "__new__";
+    newGroupFields.style.display = isNewGroup ? "block" : "none";
+    if (!isNewGroup) {
+      closeEmojiPicker();
     }
   }
 
   grupoSelect.addEventListener("change", syncGroupUI);
   syncGroupUI();
 
-  function syncStockActualUI(){
+  function syncStockActualUI() {
     const isInfinite = !!stockInfinitoCheckbox.checked;
     stockActualInput.disabled = isInfinite;
-    if(isInfinite){
+    if (isInfinite) {
       stockActualInput.value = "";
     }
   }
@@ -469,16 +547,70 @@
   });
   syncStockActualUI();
 
-  // --- Validación visual en vivo del alta ---
+  function updateEmojiPickerUI() {
+    const value = (groupEmojiInput && groupEmojiInput.value || "").trim();
+    if (groupEmojiValue) {
+      groupEmojiValue.textContent = value ? `${value} Seleccionado` : "Selecciona un emoji";
+    }
+    const groupEmojiOptions = Array.from(document.querySelectorAll(".emoji-option"));
+    groupEmojiOptions.forEach((button) => {
+      button.classList.toggle("emoji-option-selected", button.dataset.emoji === value);
+    });
+  }
+
+  function openEmojiPicker() {
+    if (!groupEmojiMenu || !groupEmojiTrigger) return;
+    const triggerRect = groupEmojiTrigger.getBoundingClientRect();
+    const margin = 18;
+    const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
+    const spaceAbove = triggerRect.top - margin;
+    const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+
+    groupEmojiMenu.classList.toggle("emoji-picker-menu-up", shouldOpenUp);
+    if (groupEmojiScroll) {
+      const available = Math.max(180, shouldOpenUp ? spaceAbove - 16 : spaceBelow - 16);
+      groupEmojiScroll.style.maxHeight = `${Math.min(360, available)}px`;
+    }
+    groupEmojiMenu.hidden = false;
+    groupEmojiTrigger.setAttribute("aria-expanded", "true");
+  }
+
+  function closeEmojiPicker() {
+    if (!groupEmojiMenu || !groupEmojiTrigger) return;
+    groupEmojiMenu.hidden = true;
+    groupEmojiTrigger.setAttribute("aria-expanded", "false");
+    groupEmojiMenu.classList.remove("emoji-picker-menu-up");
+  }
+
+  function toggleEmojiPicker() {
+    if (!groupEmojiMenu || groupEmojiMenu.hidden) openEmojiPicker();
+    else closeEmojiPicker();
+  }
+
+  if (groupEmojiTrigger) {
+    groupEmojiTrigger.addEventListener("click", () => {
+      toggleEmojiPicker();
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    const picker = document.getElementById("groupEmojiPicker");
+    if (!picker || picker.contains(event.target)) return;
+    closeEmojiPicker();
+  });
+
+  renderEmojiPicker();
+  updateEmojiPickerUI();
+
   const newProdForm = document.getElementById("newProdForm");
   const liveFields = Array.from(newProdForm.querySelectorAll(".js-live-field"));
 
-  function setFieldState(el, state){
+  function setFieldState(el, state) {
     el.classList.remove("field-pending", "field-valid", "field-invalid");
     el.classList.add(state);
   }
 
-  function parseNumber(raw){
+  function parseNumber(raw) {
     let t = (raw || "").trim().replace(/\s/g, "");
     if (t === "") return null;
     if (t.includes(",") && t.includes(".")) {
@@ -494,49 +626,49 @@
     return Number.isFinite(n) ? n : Number.NaN;
   }
 
-  function validateField(el){
+  function validateField(el) {
     const rule = el.dataset.rule || "required";
     const val = (el.value || "").trim();
     const isNewGroup = grupoSelect.value === "__new__";
     const isInfinite = !!stockInfinitoCheckbox.checked;
 
-    if(rule === "required"){
-      if(val === "") return "field-pending";
+    if (rule === "required") {
+      if (val === "") return "field-pending";
       return "field-valid";
     }
 
-    if(rule === "number"){
-      if(val === "") return "field-pending";
+    if (rule === "number") {
+      if (val === "") return "field-pending";
       const n = parseNumber(val);
-      if(Number.isNaN(n) || n < 0) return "field-invalid";
+      if (Number.isNaN(n) || n < 0) return "field-invalid";
       return "field-valid";
     }
 
-    if(rule === "required-when-new-group"){
-      if(!isNewGroup) return "field-valid";
-      if(val === "") return "field-pending";
+    if (rule === "required-when-new-group") {
+      if (!isNewGroup) return "field-valid";
+      if (val === "") return "field-pending";
       return "field-valid";
     }
 
-    if(rule === "required-number-when-finite"){
-      if(isInfinite) return "field-valid";
-      if(val === "") return "field-pending";
+    if (rule === "required-number-when-finite") {
+      if (isInfinite) return "field-valid";
+      if (val === "") return "field-pending";
       const n = parseNumber(val);
-      if(Number.isNaN(n) || n < 0) return "field-invalid";
+      if (Number.isNaN(n) || n < 0) return "field-invalid";
       return "field-valid";
     }
 
     return "field-valid";
   }
 
-  function refreshValidation(){
-    liveFields.forEach(el => {
+  function refreshValidation() {
+    liveFields.forEach((el) => {
       const state = validateField(el);
       setFieldState(el, state);
     });
   }
 
-  liveFields.forEach(el => {
+  liveFields.forEach((el) => {
     const ev = el.tagName.toLowerCase() === "select" ? "change" : "input";
     el.addEventListener(ev, refreshValidation);
   });
@@ -548,23 +680,21 @@
     const hasInvalid = allStates.includes("field-invalid");
     const hasPending = allStates.includes("field-pending");
 
-    if(hasInvalid || hasPending){
+    if (hasInvalid || hasPending) {
       e.preventDefault();
       refreshValidation();
-      alert("Completa los campos obligatorios y corrige los que están en rojo antes de crear el producto.");
+      alert("Completa los campos obligatorios y corrige los que estan en rojo antes de crear el producto.");
       return;
     }
 
-    // Normaliza numéricos con punto decimal antes de enviar.
-    ["precio_unitario", "stock_minimo", "stock_actual"].forEach(name => {
+    ["precio_unitario", "stock_minimo", "stock_actual"].forEach((name) => {
       const input = newProdForm.querySelector(`[name="${name}"]`);
-      if(input.disabled) return;
+      if (input.disabled) return;
       input.value = input.value.trim().replace(",", ".");
     });
   });
 
-  // --- Formato visual € para inputs de precio ---
-  function normalizeEuroRaw(raw){
+  function normalizeEuroRaw(raw) {
     let t = (raw || "").trim().replace(/[€\s]/g, "");
     if (t === "") return "";
     if (t.includes(",")) {
@@ -575,7 +705,7 @@
     return String(n);
   }
 
-  function formatEuroDisplay(raw){
+  function formatEuroDisplay(raw) {
     const norm = normalizeEuroRaw(raw);
     if (!norm) return "";
     const n = Number(norm);
@@ -601,7 +731,6 @@
     }
   });
 
-  // --- Detalle: modo edición ---
   const detailForm = document.querySelector('#productDetailBox form');
   if (detailForm) {
     const editableFields = Array.from(detailForm.querySelectorAll(".js-detail-input"));
@@ -705,5 +834,4 @@
     setDetailEditMode(false);
   }
 </script>
-
 {% endblock %}

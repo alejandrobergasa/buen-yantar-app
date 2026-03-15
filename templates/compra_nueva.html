@@ -1,32 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
-
-<section class="panel page-intro">
-  <h1 class="page-title page-title-left">🛒 Nueva compra</h1>
-  <p class="lead">Registra entradas de proveedor para actualizar existencias de forma inmediata.</p>
-  <div class="flow-steps">
-    <span class="step-chip">1. Filtra productos</span>
-    <span class="step-chip">2. Añade líneas al ticket</span>
-    <span class="step-chip">3. Registra la compra</span>
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Nueva compra</h1>
+    <a class="btn btn-secondary btn-small" href="{{ url_for('historial_compras') }}">Historial</a>
   </div>
 </section>
 
 <div class="purchase-layout">
   <section class="panel purchase-left">
-    <h2 class="panel-title">🧺 Productos del inventario</h2>
+    <div class="section-head compact-head">
+      <h2 class="section-heading">Productos</h2>
+      <span class="header-count" id="purchaseVisibleCount">{{ products|length }}</span>
+    </div>
 
     <div class="inv-filters">
       <div>
-        <label class="label">🔎 Buscar</label>
-        <input
-          id="purchaseSearch"
-          class="input"
-          placeholder="Escribe nombre del producto"
-          value="{{ current_filters.q }}"
-        >
+        <label class="label" for="purchaseSearch">Buscar</label>
+        <input id="purchaseSearch" class="input" placeholder="Escribe nombre del producto" value="{{ current_filters.q }}">
       </div>
       <div>
-        <label class="label">🧩 Grupo</label>
+        <label class="label" for="purchaseGroup">Grupo</label>
         <select id="purchaseGroup">
           <option value="">(Todos)</option>
           {% for g, e in group_options %}
@@ -34,6 +28,10 @@
           {% endfor %}
         </select>
       </div>
+    </div>
+
+    <div class="toolbar-inline actions-end">
+      <button class="btn btn-secondary btn-small" type="button" id="purchaseClearFilters">Limpiar filtros</button>
     </div>
 
     <div class="inv-scrollbox purchase-products-box">
@@ -61,17 +59,23 @@
               {% else %}
                 tabindex="0"
                 role="button"
-                aria-label="Añadir {{ p.nombre }} al ticket"
+                aria-label="Anadir {{ p.nombre }} al ticket"
               {% endif %}
             >
               <td>
                 <div class="product-row-head">
                   <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
+                  {% if p.stock_infinito == "1" %}
+                    <span class="product-state state-inf">INF</span>
+                  {% elif p.stock_zero == "1" %}
+                    <span class="product-state state-zero">0</span>
+                  {% elif p.stock_bajo == "1" %}
+                    <span class="product-state state-low">BAJO</span>
+                  {% else %}
+                    <span class="product-state state-ok">OK</span>
+                  {% endif %}
                 </div>
-                <div class="help">{{ p.grupo_emoji }} {{ p.grupo }}</div>
-                {% if p.stock_infinito == "1" %}
-                  <div class="help">No seleccionable en compras (stock infinito)</div>
-                {% endif %}
+                <div class="product-row-meta">{{ p.grupo_emoji }} {{ p.grupo }} · {{ p.unidad }}</div>
               </td>
               <td class="right">
                 {% if p.stock_infinito == "1" %}
@@ -89,30 +93,37 @@
           {% endfor %}
         </tbody>
       </table>
+      <div class="empty inventory-no-results" id="purchaseNoResults" hidden>No hay productos que coincidan con el filtro.</div>
     </div>
-    <p class="help">Pulsa sobre un producto para añadirlo al ticket. Los productos con stock infinito no se pueden seleccionar.</p>
   </section>
 
   <section class="panel purchase-right">
-    <h2 class="panel-title">🧾 Ticket de compra</h2>
+    <div class="section-head compact-head">
+      <h2 class="section-heading">Compra</h2>
+    </div>
 
     <form method="post" action="{{ url_for('nueva_compra_post') }}" id="purchaseForm" class="form">
       <input type="hidden" name="f_q" id="purchaseFQ" value="{{ current_filters.q }}">
       <input type="hidden" name="f_g" id="purchaseFG" value="{{ current_filters.g }}">
       <div class="grid-2">
         <div>
-          <label class="label">📅 Fecha compra</label>
+          <label class="label">Fecha compra</label>
           <input class="input" type="date" name="fecha_compra" value="{{ today_iso }}" required>
         </div>
         <div>
-          <label class="label">🏪 Proveedor (opcional)</label>
+          <label class="label">Proveedor</label>
           <input class="input" name="proveedor" placeholder="Ej: Distribuciones Norte">
         </div>
       </div>
 
       <div>
-        <label class="label">📝 Nota global (opcional)</label>
-        <input class="input" name="nota_global" placeholder="Observación general de la compra">
+        <label class="label">Nota global</label>
+        <input class="input" name="nota_global" placeholder="Observacion general de la compra">
+      </div>
+
+      <div class="toolbar-inline actions-end ticket-toolbar">
+        <span class="draft-status" id="purchaseDraftStatus" data-state="empty">Borrador vacio</span>
+        <button class="btn btn-secondary btn-small" type="button" id="purchaseClearLines">Vaciar ticket</button>
       </div>
 
       <div class="inv-scrollbox purchase-lines-box">
@@ -122,7 +133,7 @@
               <th>Producto</th>
               <th class="right">Cantidad</th>
               <th class="right">Precio compra</th>
-              <th>Nota línea</th>
+              <th>Nota linea</th>
               <th></th>
             </tr>
           </thead>
@@ -134,15 +145,12 @@
         </table>
       </div>
 
-      <div class="purchase-summary">
-        <span class="badge">Líneas: <strong id="sumLines">0</strong></span>
-        <span class="badge">Unidades: <strong id="sumUnits">0</strong></span>
-        <span class="badge">Importe: <strong id="sumAmount">0.00 €</strong></span>
+      <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
+        Total: <strong id="sumAmount">0.00 €</strong>
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" type="submit">✅ Registrar compra</button>
-        <a class="btn btn-secondary" href="{{ url_for('home') }}">↩️ Volver</a>
+        <button class="btn btn-primary" type="submit">Registrar compra</button>
       </div>
     </form>
   </section>
@@ -165,7 +173,7 @@
       <input class="input" name="nota_linea[]" placeholder="Opcional">
     </td>
     <td>
-      <button type="button" class="btn btn-secondary purchase-remove">🗑️</button>
+      <button type="button" class="btn btn-secondary purchase-remove">Eliminar</button>
     </td>
   </tr>
 </template>
@@ -180,7 +188,7 @@
       .toLowerCase();
   }
 
-  function parseNumber(raw){
+  function parseNumber(raw) {
     let t = (raw || "").trim().replace(/\s/g, "");
     if (!t) return null;
     if (t.includes(",") && t.includes(".")) {
@@ -196,22 +204,22 @@
     return Number.isFinite(n) ? n : Number.NaN;
   }
 
-  function setFieldState(el, state){
+  function setFieldState(el, state) {
     el.classList.remove("field-pending", "field-valid", "field-invalid");
     el.classList.add(state);
   }
 
-  function validateField(el){
+  function validateField(el) {
     const rule = el.dataset.rule || "";
     const val = (el.value || "").trim();
 
-    if (rule === "positive-number"){
+    if (rule === "positive-number") {
       if (!val) return "field-pending";
       const n = parseNumber(val);
       if (Number.isNaN(n) || n <= 0) return "field-invalid";
       return "field-valid";
     }
-    if (rule === "non-negative-number-or-empty"){
+    if (rule === "non-negative-number-or-empty") {
       if (!val) return "field-valid";
       const n = parseNumber(val);
       if (Number.isNaN(n) || n < 0) return "field-invalid";
@@ -222,34 +230,172 @@
 
   const searchBox = document.getElementById("purchaseSearch");
   const groupFilter = document.getElementById("purchaseGroup");
+  const clearFiltersBtn = document.getElementById("purchaseClearFilters");
+  const clearLinesBtn = document.getElementById("purchaseClearLines");
+  const visibleCount = document.getElementById("purchaseVisibleCount");
+  const noResultsBox = document.getElementById("purchaseNoResults");
   const productRows = Array.from(document.querySelectorAll(".purchase-product-row"));
-
   const purchaseLines = document.getElementById("purchaseLines");
   const purchaseEmpty = document.getElementById("purchaseEmpty");
   const rowTpl = document.getElementById("ticketRowTpl");
   const purchaseForm = document.getElementById("purchaseForm");
+  const draftStatus = document.getElementById("purchaseDraftStatus");
   const hiddenFQ = document.getElementById("purchaseFQ");
   const hiddenFG = document.getElementById("purchaseFG");
-  const sumLines = document.getElementById("sumLines");
-  const sumUnits = document.getElementById("sumUnits");
   const sumAmount = document.getElementById("sumAmount");
-
   const selectedById = new Map();
+  const draftKey = "buen-yantar:purchase-draft:v1";
+  let purchaseSubmitting = false;
 
-  function applyProductFilters(){
+  function productDataFromRow(sourceRow) {
+    return {
+      pid: sourceRow.dataset.productId,
+      name: sourceRow.dataset.name || "",
+      emoji: sourceRow.dataset.emoji || "📦",
+      group: sourceRow.dataset.group || "Otros",
+      unit: sourceRow.dataset.unit || "ud",
+    };
+  }
+
+  function hasDraftContent() {
+    return (
+      selectedById.size > 0
+      || (searchBox.value || "").trim() !== ""
+      || (groupFilter.value || "").trim() !== ""
+      || (purchaseForm.querySelector('[name="proveedor"]').value || "").trim() !== ""
+      || (purchaseForm.querySelector('[name="nota_global"]').value || "").trim() !== ""
+    );
+  }
+
+  function updateDraftStatus(state, text) {
+    if (!draftStatus) return;
+    draftStatus.dataset.state = state;
+    draftStatus.textContent = text;
+  }
+
+  function serializeDraft() {
+    return {
+      filters: {
+        q: (searchBox.value || "").trim(),
+        g: (groupFilter.value || "").trim(),
+      },
+      fields: {
+        fecha_compra: purchaseForm.querySelector('[name="fecha_compra"]').value || "",
+        proveedor: purchaseForm.querySelector('[name="proveedor"]').value || "",
+        nota_global: purchaseForm.querySelector('[name="nota_global"]').value || "",
+      },
+      lines: Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => ({
+        producto_id: row.querySelector(".ticket-product-id").value,
+        cantidad: row.querySelector('input[name="cantidad[]"]').value || "",
+        precio_compra: row.querySelector('input[name="precio_compra[]"]').value || "",
+        nota_linea: row.querySelector('input[name="nota_linea[]"]').value || "",
+      })),
+    };
+  }
+
+  function saveDraft() {
+    if (!hasDraftContent()) {
+      sessionStorage.removeItem(draftKey);
+      updateDraftStatus("empty", "Borrador vacio");
+      return;
+    }
+    sessionStorage.setItem(draftKey, JSON.stringify(serializeDraft()));
+    updateDraftStatus("saved", "Borrador guardado en este navegador");
+  }
+
+  function clearDraft() {
+    sessionStorage.removeItem(draftKey);
+    updateDraftStatus("empty", "Borrador vacio");
+  }
+
+  function appendPurchaseRow(data, options = {}) {
+    const row = rowTpl.content.firstElementChild.cloneNode(true);
+    row.querySelector(".ticket-product-id").value = data.pid;
+    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    row.querySelector(".ticket-product-meta").textContent = `${data.emoji} ${data.group} · ${data.unit}`;
+    row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "";
+    row.querySelector('input[name="precio_compra[]"]').value = data.price ?? "";
+    row.querySelector('input[name="nota_linea[]"]').value = data.note ?? "";
+
+    purchaseLines.appendChild(row);
+    selectedById.set(data.pid, row);
+    attachTicketEvents(row);
+    refreshEmptyState();
+    refreshSummary();
+
+    if (options.focus !== false) {
+      row.querySelector('input[name="cantidad[]"]').focus();
+    }
+    return row;
+  }
+
+  function restoreDraft() {
+    const raw = sessionStorage.getItem(draftKey);
+    if (!raw) {
+      updateDraftStatus("empty", "Borrador vacio");
+      return;
+    }
+
+    try {
+      const draft = JSON.parse(raw);
+      if (draft.filters) {
+        searchBox.value = draft.filters.q || "";
+        groupFilter.value = draft.filters.g || "";
+      }
+      if (draft.fields) {
+        purchaseForm.querySelector('[name="fecha_compra"]').value = draft.fields.fecha_compra || purchaseForm.querySelector('[name="fecha_compra"]').value;
+        purchaseForm.querySelector('[name="proveedor"]').value = draft.fields.proveedor || "";
+        purchaseForm.querySelector('[name="nota_global"]').value = draft.fields.nota_global || "";
+      }
+      if (Array.isArray(draft.lines)) {
+        draft.lines.forEach((line) => {
+          const sourceRow = productRows.find((tr) => tr.dataset.productId === line.producto_id);
+          if (!sourceRow || sourceRow.dataset.inf === "1") return;
+          appendPurchaseRow(
+            {
+              ...productDataFromRow(sourceRow),
+              qty: line.cantidad || "",
+              price: line.precio_compra || "",
+              note: line.nota_linea || "",
+            },
+            { focus: false }
+          );
+        });
+      }
+      updateDraftStatus(hasDraftContent() ? "saved" : "empty", hasDraftContent() ? "Borrador restaurado" : "Borrador vacio");
+    } catch (error) {
+      sessionStorage.removeItem(draftKey);
+      updateDraftStatus("empty", "Borrador vacio");
+    }
+  }
+
+  function syncSelectedState() {
+    productRows.forEach((tr) => {
+      const pid = tr.dataset.productId;
+      tr.classList.toggle("row-selected-soft", selectedById.has(pid));
+    });
+  }
+
+  function applyProductFilters() {
     const q = normalizeText(searchBox.value);
     const g = (groupFilter.value || "").trim();
+    let visible = 0;
 
     productRows.forEach((tr) => {
       const name = normalizeText(tr.dataset.name || "");
       const group = (tr.dataset.group || "").trim();
       const okText = (q === "") || name.includes(q);
       const okGroup = (g === "") || (group === g);
-      tr.style.display = (okText && okGroup) ? "" : "none";
+      const isVisible = okText && okGroup;
+      tr.style.display = isVisible ? "" : "none";
+      if (isVisible) visible += 1;
     });
+
+    visibleCount.textContent = String(visible);
+    noResultsBox.hidden = visible !== 0;
   }
 
-  function syncFilterState(){
+  function syncFilterState() {
     const q = (searchBox.value || "").trim();
     const g = (groupFilter.value || "").trim();
 
@@ -265,37 +411,29 @@
     history.replaceState(null, "", `${next.pathname}${search ? `?${search}` : ""}`);
   }
 
-  function refreshSummary(){
+  function refreshSummary() {
     const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
-    let lines = rows.length;
-    let units = 0;
     let amount = 0;
 
     rows.forEach((row) => {
       const q = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
       const p = parseNumber(row.querySelector('input[name="precio_compra[]"]').value);
-      if (q !== null && !Number.isNaN(q) && q > 0){
-        units += q;
-        if (p !== null && !Number.isNaN(p) && p >= 0){
+      if (q !== null && !Number.isNaN(q) && q > 0) {
+        if (p !== null && !Number.isNaN(p) && p >= 0) {
           amount += q * p;
         }
       }
     });
 
-    sumLines.textContent = String(lines);
-    sumUnits.textContent = Number.isInteger(units) ? String(units) : units.toFixed(2);
-    sumAmount.textContent = `${amount.toFixed(2)} €`;
+    if (sumAmount) sumAmount.textContent = `${amount.toFixed(2)} €`;
   }
 
-  function refreshEmptyState(){
-    if (selectedById.size === 0){
-      purchaseEmpty.style.display = "";
-    } else {
-      purchaseEmpty.style.display = "none";
-    }
+  function refreshEmptyState() {
+    purchaseEmpty.style.display = selectedById.size === 0 ? "" : "none";
+    syncSelectedState();
   }
 
-  function attachTicketEvents(row){
+  function attachTicketEvents(row) {
     const qty = row.querySelector('input[name="cantidad[]"]');
     const price = row.querySelector('input[name="precio_compra[]"]');
     const note = row.querySelector('input[name="nota_linea[]"]');
@@ -315,40 +453,37 @@
       row.remove();
       refreshEmptyState();
       refreshSummary();
+      saveDraft();
     });
   }
 
-  function addProductToTicket(sourceRow){
+  function addProductToTicket(sourceRow) {
     const pid = sourceRow.dataset.productId;
     if (!pid) return;
     if (sourceRow.dataset.inf === "1") return;
 
-    if (selectedById.has(pid)){
-      const existing = selectedById.get(pid);
-      existing.querySelector('input[name="cantidad[]"]').focus();
+    if (selectedById.has(pid)) {
+      const qtyInput = selectedById.get(pid).querySelector('input[name="cantidad[]"]');
+      const currentQty = parseNumber(qtyInput.value);
+      qtyInput.value = String((currentQty !== null && !Number.isNaN(currentQty) ? currentQty : 0) + 1);
+      setFieldState(qtyInput, validateField(qtyInput));
+      refreshSummary();
+      saveDraft();
+      qtyInput.focus();
+      qtyInput.select();
       return;
     }
 
-    const row = rowTpl.content.firstElementChild.cloneNode(true);
-    row.querySelector(".ticket-product-id").value = pid;
+    appendPurchaseRow(productDataFromRow(sourceRow));
+    saveDraft();
+  }
 
-    const name = sourceRow.dataset.name || "";
-    const emoji = sourceRow.dataset.emoji || "📦";
-    const group = sourceRow.dataset.group || "Otros";
-    const unit = sourceRow.dataset.unit || "ud";
-    const inf = sourceRow.dataset.inf === "1";
-
-    row.querySelector(".ticket-product-name").textContent = `${emoji} ${name}`;
-    row.querySelector(".ticket-product-meta").textContent = `${emoji} ${group} · Unidad: ${unit} · Stock: ${inf ? "♾️" : "normal"}`;
-
-    purchaseLines.appendChild(row);
-    selectedById.set(pid, row);
-    attachTicketEvents(row);
+  function clearTicket() {
+    selectedById.clear();
+    Array.from(purchaseLines.querySelectorAll(".purchase-row")).forEach((row) => row.remove());
     refreshEmptyState();
     refreshSummary();
-
-    const qty = row.querySelector('input[name="cantidad[]"]');
-    qty.focus();
+    saveDraft();
   }
 
   productRows.forEach((tr) => {
@@ -369,15 +504,51 @@
     applyProductFilters();
     syncFilterState();
   });
+  clearFiltersBtn.addEventListener("click", () => {
+    searchBox.value = "";
+    groupFilter.value = "";
+    applyProductFilters();
+    syncFilterState();
+    saveDraft();
+  });
+  clearLinesBtn.addEventListener("click", clearTicket);
+  purchaseForm.addEventListener("input", saveDraft);
+  purchaseForm.addEventListener("change", saveDraft);
+
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement && document.activeElement.tagName || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select";
+    if (e.key === "/" && !typing) {
+      e.preventDefault();
+      searchBox.focus();
+      searchBox.select();
+    }
+    if (e.key === "Escape" && !typing && ((searchBox.value || "").trim() || (groupFilter.value || "").trim())) {
+      searchBox.value = "";
+      groupFilter.value = "";
+      applyProductFilters();
+      syncFilterState();
+      saveDraft();
+    }
+  });
+
+  restoreDraft();
   applyProductFilters();
   syncFilterState();
+  refreshEmptyState();
   refreshSummary();
+
+  window.addEventListener("beforeunload", (e) => {
+    if (purchaseSubmitting || !hasDraftContent()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
 
   purchaseForm.addEventListener("submit", (e) => {
     const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
-    if (rows.length === 0){
+    if (rows.length === 0) {
       e.preventDefault();
-      alert("Debes añadir al menos un producto antes de registrar la compra.");
+      alert("Debes anadir al menos un producto antes de registrar la compra.");
       return;
     }
 
@@ -386,13 +557,13 @@
       row.querySelectorAll(".js-purchase-field").forEach((field) => {
         const state = validateField(field);
         setFieldState(field, state);
-        if (state === "field-invalid" || state === "field-pending"){
+        if (state === "field-invalid" || state === "field-pending") {
           hasErrors = true;
         }
       });
     });
 
-    if (hasErrors){
+    if (hasErrors) {
       e.preventDefault();
       alert("Revisa los campos marcados antes de registrar la compra.");
       return;
@@ -407,7 +578,8 @@
         }
       });
     });
+    purchaseSubmitting = true;
+    clearDraft();
   });
 </script>
-
 {% endblock %}

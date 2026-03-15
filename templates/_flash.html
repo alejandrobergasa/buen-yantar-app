@@ -2,7 +2,10 @@
   {% if messages %}
     <div class="flash" role="status" aria-live="polite" aria-atomic="true">
       {% for m in messages %}
-        <div class="flash-item">{{ m }}</div>
+        <div class="flash-item">
+          <span>{{ m }}</span>
+          <button class="flash-close" type="button" data-flash-close aria-label="Cerrar mensaje">×</button>
+        </div>
       {% endfor %}
     </div>
   {% endif %}

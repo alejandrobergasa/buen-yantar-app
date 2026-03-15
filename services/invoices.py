@@ -140,3 +140,25 @@ def list_invoices(facturas_csv: Path, limit: int = 400) -> List[Dict[str, str]]:
 
 def list_invoice_lines(facturas_lineas_csv: Path) -> List[Dict[str, str]]:
     return read_all(facturas_lineas_csv)
+
+
+def find_invoice(facturas_csv: Path, factura_id: str) -> Dict[str, str] | None:
+    target = (factura_id or "").strip()
+    if not target:
+        return None
+
+    for row in read_all(facturas_csv):
+        if (row.get("factura_id") or "").strip() == target:
+            return row
+    return None
+
+
+def list_invoice_lines_for(facturas_lineas_csv: Path, factura_id: str) -> List[Dict[str, str]]:
+    target = (factura_id or "").strip()
+    if not target:
+        return []
+
+    return [
+        row for row in read_all(facturas_lineas_csv)
+        if (row.get("factura_id") or "").strip() == target
+    ]

@@ -2,10 +2,9 @@
 {% block content %}
 <div class="auth-wrap">
   <section class="panel auth-card">
-    <h1 class="page-title">Acceso</h1>
-    <p class="lead lead-centered">Introduce tus datos para entrar en la aplicación.</p>
+    <h1 class="page-title">Entrar</h1>
 
-    <form method="post" class="form">
+    <form method="post" class="form auth-form">
       <div>
         <label class="label" for="usernameField">Usuario</label>
         <input id="usernameField" class="input" name="username" autocomplete="username" required autofocus>
@@ -18,8 +17,6 @@
 
       <button class="btn btn-primary" type="submit">Entrar</button>
     </form>
-
-    <p class="help auth-help">Si no recuerdas tu acceso, pide ayuda al administrador del sistema.</p>
   </section>
 </div>
 {% endblock %}

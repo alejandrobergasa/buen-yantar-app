@@ -1,29 +1,40 @@
 {% extends "base.html" %}
 {% block content %}
-
-<section class="panel page-intro">
-  <h1 class="page-title page-title-left">🛒 Historial de compras</h1>
-  <p class="lead">Consulta compras registradas por referencia y despliega el detalle de líneas cuando lo necesites.</p>
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Historial de compras</h1>
+  </div>
 </section>
 
 <section class="panel">
   <form method="get" class="form">
     <div class="grid-2">
       <div>
-        <label class="label">🔎 Buscar</label>
-        <input class="input" name="q" value="{{ current_q }}" placeholder="Referencia o proveedor">
+        <label class="label">Buscar</label>
+        <input class="input" name="q" value="{{ current_q }}" placeholder="Referencia, proveedor o usuario">
       </div>
-      <div class="actions" style="align-items:flex-end;">
+      <div class="grid-2">
+        <div>
+          <label class="label">Desde</label>
+          <input class="input" type="date" name="from" value="{{ current_from }}">
+        </div>
+        <div>
+          <label class="label">Hasta</label>
+          <input class="input" type="date" name="to" value="{{ current_to }}">
+        </div>
+      </div>
+    </div>
+    <div class="actions actions-end">
         <button class="btn btn-primary" type="submit">Filtrar</button>
+        <a class="btn btn-secondary" href="{{ url_for('export_historial_compras', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
         <a class="btn btn-secondary" href="{{ url_for('historial_compras') }}">Limpiar</a>
-      </div>
     </div>
   </form>
 </section>
 
-<section class="panel" style="margin-top:0.75rem;">
+<section class="panel table-card">
   {% if not tickets %}
-    <div class="empty">No hay compras registradas.</div>
+    <div class="empty">No hay compras que mostrar con los filtros actuales.</div>
   {% else %}
     <div class="inv-scrollbox" style="max-height:70vh;">
       <table class="table">
@@ -33,7 +44,7 @@
             <th>Fecha</th>
             <th>Usuario</th>
             <th>Proveedor</th>
-            <th class="right">Líneas</th>
+            <th class="right">Lineas</th>
             <th class="right">Unidades</th>
             <th class="right">Importe</th>
             <th>Detalle</th>
@@ -42,7 +53,12 @@
         <tbody>
           {% for t in tickets %}
             <tr>
-              <td><strong>{{ t.ref_id }}</strong></td>
+              <td>
+                <div class="cell-inline">
+                  <strong>{{ t.ref_id }}</strong>
+                  <button class="copy-btn" type="button" data-copy-text="{{ t.ref_id }}">Copiar</button>
+                </div>
+              </td>
               <td>{{ (t.fecha or "")[:10] }}</td>
               <td>{{ t.usuario or "-" }}</td>
               <td>{{ t.proveedor or "-" }}</td>
@@ -51,10 +67,10 @@
               <td class="right">{{ t.total_importe }} €</td>
               <td>
                 <details>
-                  <summary>Ver líneas</summary>
+                  <summary>Ver lineas</summary>
                   {% set lines = lines_map.get(t.ref_id, []) %}
                   {% if not lines %}
-                    <div class="help" style="margin-top:0.4rem;">Sin líneas registradas.</div>
+                    <div class="help" style="margin-top:0.4rem;">Sin lineas registradas.</div>
                   {% else %}
                     <div class="inv-scrollbox" style="max-height:14rem; margin-top:0.5rem;">
                       <table class="table">
@@ -88,5 +104,36 @@
     </div>
   {% endif %}
 </section>
+<script>
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const helper = document.createElement("textarea");
+    helper.value = text;
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    document.execCommand("copy");
+    helper.remove();
+  }
 
+  document.querySelectorAll("[data-copy-text]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const original = button.textContent;
+      try {
+        await copyText(button.dataset.copyText || "");
+        button.textContent = "Copiado";
+      } catch (error) {
+        button.textContent = "No se pudo";
+      }
+      window.setTimeout(() => {
+        button.textContent = original;
+      }, 1400);
+    });
+  });
+</script>
 {% endblock %}

@@ -12,9 +12,11 @@ CSV_MOVS = DATA_DIR / "movimientos_inventario.csv"
 CSV_FACTURAS = DATA_DIR / "facturas.csv"
 CSV_FACTURA_LINEAS = DATA_DIR / "facturas_lineas.csv"
 CSV_LOGS = DATA_DIR / "logs_acciones.csv"
+PRINT_JOBS_DIR = DATA_DIR / "print_jobs"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-cambia-esto")
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    PRINT_JOBS_DIR.mkdir(parents=True, exist_ok=True)

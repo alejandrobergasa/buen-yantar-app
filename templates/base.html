@@ -2,33 +2,64 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>{{ title or "Sociedad" }}</title>
+  <title>{% if title %}{{ title }} · {% endif %}Buen Yantar</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}">
   <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
+  <div class="page-glow page-glow-a" aria-hidden="true"></div>
+  <div class="page-glow page-glow-b" aria-hidden="true"></div>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand-wrap">
-        <a class="brand" href="{{ url_for('home') }}">Sociedad gastronómica Buen Yantar</a>
-        <span class="brand-sub">Gestión</span>
+      <div class="brand-row">
+        <div class="brand-wrap">
+          <a class="brand" href="{{ url_for('inventario') if request.endpoint == 'inventario' else url_for('home') }}">{% if request.endpoint == "inventario" %}Inventario{% else %}Sociedad gastronómica Buen Yantar{% endif %}</a>
+        </div>
+
+        {% if session.get("user") %}
+        <div class="topbar-meta">
+          <span class="status-pill status-pill-user">Usuario: {{ session.get("user") }}</span>
+          <span class="status-pill">{% if g.is_admin %}Administrador{% else %}Operativa diaria{% endif %}</span>
+          <span class="status-pill">{{ today_label }}</span>
+        </div>
+        {% endif %}
       </div>
 
       {% if session.get("user") %}
-      <nav class="top-actions" aria-label="Navegación principal">
-        <span class="user-badge">Usuario: {{ session.get("user") }}</span>
-        <a class="link" href="{{ url_for('home') }}">Inicio</a>
-        <a class="link" href="{{ url_for('logout') }}">Salir</a>
-      </nav>
+      <div class="topbar-actions">
+        <nav class="top-nav" aria-label="Secciones principales">
+          {% for item in shell_nav_items %}
+            <a class="nav-pill {% if request.endpoint in item.endpoints %}nav-pill-active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+          {% endfor %}
+        </nav>
+
+        <nav class="top-actions" aria-label="Acciones de sesión">
+          <a class="link" href="{{ url_for('home') }}">Inicio</a>
+          <a class="link link-danger" href="{{ url_for('logout') }}">Salir</a>
+        </nav>
+      </div>
+      {% else %}
+      <div class="topbar-login-note">
+        <span class="status-pill">Acceso privado</span>
+      </div>
       {% endif %}
     </div>
   </header>
 
-  <main id="mainContent" class="container">
+  <main id="mainContent" class="container page-stack">
     {% include "_flash.html" %}
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    document.querySelectorAll("[data-flash-close]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const item = button.closest(".flash-item");
+        if (item) item.remove();
+      });
+    });
+  </script>
 </body>
 </html>
