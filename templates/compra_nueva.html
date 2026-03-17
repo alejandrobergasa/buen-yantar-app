@@ -51,6 +51,7 @@
               data-group="{{ p.grupo }}"
               data-unit="{{ p.unidad }}"
               data-emoji="{{ p.grupo_emoji }}"
+              data-sale-price="{{ p.precio_venta_actual }}"
               data-inf="{{ p.stock_infinito }}"
               {% if p.stock_infinito == "1" %}
                 tabindex="-1"
@@ -133,13 +134,15 @@
               <th>Producto</th>
               <th class="right">Cantidad</th>
               <th class="right">Precio compra</th>
+              <th class="right">Venta actual</th>
+              <th class="right">Venta recomendada</th>
               <th>Nota linea</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="purchaseLines">
             <tr id="purchaseEmpty">
-              <td colspan="5" class="empty">Selecciona productos desde la columna izquierda.</td>
+              <td colspan="7" class="empty">Selecciona productos desde la columna izquierda.</td>
             </tr>
           </tbody>
         </table>
@@ -168,6 +171,12 @@
     </td>
     <td class="right">
       <input class="input input-num js-purchase-field" name="precio_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
+    </td>
+    <td class="right">
+      <div class="purchase-price-hint purchase-sale-current">-</div>
+    </td>
+    <td class="right">
+      <div class="purchase-price-hint purchase-sale-recommended">-</div>
     </td>
     <td>
       <input class="input" name="nota_linea[]" placeholder="Opcional">
@@ -254,7 +263,12 @@
       emoji: sourceRow.dataset.emoji || "📦",
       group: sourceRow.dataset.group || "Otros",
       unit: sourceRow.dataset.unit || "ud",
+      salePrice: sourceRow.dataset.salePrice || "",
     };
+  }
+
+  function formatMoney(value) {
+    return `${value.toFixed(2)} €`;
   }
 
   function hasDraftContent() {
@@ -316,6 +330,12 @@
     row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "";
     row.querySelector('input[name="precio_compra[]"]').value = data.price ?? "";
     row.querySelector('input[name="nota_linea[]"]').value = data.note ?? "";
+    row.dataset.salePrice = data.salePrice ?? "";
+
+    const currentSale = parseNumber(data.salePrice ?? "");
+    row.querySelector(".purchase-sale-current").textContent = (currentSale !== null && !Number.isNaN(currentSale))
+      ? formatMoney(currentSale)
+      : "-";
 
     purchaseLines.appendChild(row);
     selectedById.set(data.pid, row);
@@ -433,6 +453,19 @@
     syncSelectedState();
   }
 
+  function updateSaleRecommendation(row) {
+    const recommendedNode = row.querySelector(".purchase-sale-recommended");
+    if (!recommendedNode) return;
+
+    const purchasePrice = parseNumber(row.querySelector('input[name="precio_compra[]"]').value);
+    if (purchasePrice === null || Number.isNaN(purchasePrice) || purchasePrice < 0) {
+      recommendedNode.textContent = "-";
+      return;
+    }
+
+    recommendedNode.textContent = formatMoney(purchasePrice * 1.2);
+  }
+
   function attachTicketEvents(row) {
     const qty = row.querySelector('input[name="cantidad[]"]');
     const price = row.querySelector('input[name="precio_compra[]"]');
@@ -443,6 +476,7 @@
     [qty, price].forEach((el) => {
       el.addEventListener("input", () => {
         setFieldState(el, validateField(el));
+        if (el === price) updateSaleRecommendation(row);
         refreshSummary();
       });
     });
@@ -455,6 +489,8 @@
       refreshSummary();
       saveDraft();
     });
+
+    updateSaleRecommendation(row);
   }
 
   function addProductToTicket(sourceRow) {

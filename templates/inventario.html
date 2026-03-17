@@ -279,6 +279,22 @@
                 </div>
 
                 <aside class="detail-side">
+                  <h3 class="panel-title detail-side-title">Precio recomendado</h3>
+                  {% if purchase_recommendation %}
+                    <div class="detail-price-card">
+                      <strong>{{ "%.2f"|format(purchase_recommendation.recomendado) }} € / {{ purchase_recommendation.unidad }}</strong>
+                      <div class="help">
+                        Ultima compra: {{ "%.2f"|format(purchase_recommendation.ultima_compra) }} € / {{ purchase_recommendation.unidad }}
+                        {% if purchase_recommendation.fecha %} · {{ purchase_recommendation.fecha }}{% endif %}
+                      </div>
+                    </div>
+                  {% else %}
+                    <div class="detail-price-card detail-price-card-muted">
+                      <strong>No disponible</strong>
+                      <div class="help">Todavia no hay un precio de compra registrado para calcular la recomendacion.</div>
+                    </div>
+                  {% endif %}
+
                   <h3 class="panel-title detail-side-title">Compras</h3>
                   <div class="inv-scrollbox detail-history-box">
                     {% if not selected_purchases %}

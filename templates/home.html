@@ -1,16 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro page-header-bar home-hero-simple">
-  <div class="page-header-main">
-    <h1 class="page-title page-title-left">Inicio</h1>
-    <div class="hero-actions">
-      <a class="btn btn-primary" href="{{ url_for('inventario') }}">Inventario</a>
-      <a class="btn btn-secondary" href="{{ url_for('nueva_factura') }}">Nueva factura</a>
-      <a class="btn btn-secondary" href="{{ url_for('nueva_compra') }}">Nueva compra</a>
-    </div>
-  </div>
-</section>
-
 <div class="home-clean-layout">
   <section class="panel home-main-panel">
     <div class="section-head compact-head">
@@ -34,6 +23,10 @@
           <a class="action-card action-card-primary" href="{{ url_for('nueva_compra') }}">
             <h2>Nueva compra</h2>
           </a>
+
+          <a class="action-card action-card-primary" href="{{ url_for('nuevo_gasto_libre') }}">
+            <h2>Gasto libre</h2>
+          </a>
         </div>
       </div>
 
@@ -48,13 +41,25 @@
             <h2>Compras</h2>
           </a>
 
-          <a class="action-card action-card-short" href="{{ url_for('gestion_usuarios') }}">
-            <h2>Usuarios</h2>
+          <a class="action-card action-card-short" href="{{ url_for('historial_gastos_libres') }}">
+            <h2>Gastos</h2>
           </a>
 
           {% if g.is_admin %}
-          <a class="action-card action-card-short" href="{{ url_for('supervision') }}">
-            <h2>Supervision</h2>
+          <details class="admin-action-menu admin-action-menu-grid">
+            <summary class="action-card action-card-short admin-action-summary-card">
+              <h2>Configuracion</h2>
+            </summary>
+            <div class="admin-action-dropdown">
+              <a class="admin-action-link" href="{{ url_for('configuracion') }}#saldo-caja">Configurar saldo de caja</a>
+              <a class="admin-action-link" href="{{ url_for('configuracion') }}#usuarios-admin">Configurar usuarios</a>
+              <a class="admin-action-link" href="{{ url_for('configuracion') }}#logs-uso">Revisar logs de uso</a>
+              <a class="admin-action-link" href="{{ url_for('configuracion', file='productos') }}#datos-manuales">Editar archivos de datos manualmente</a>
+            </div>
+          </details>
+          {% else %}
+          <a class="action-card action-card-short" href="{{ url_for('gestion_usuarios') }}">
+            <h2>Usuario</h2>
           </a>
           {% endif %}
         </div>
@@ -66,27 +71,56 @@
     <section class="panel home-side-panel">
       <div class="section-head compact-head">
         <div>
-          <h2 class="section-heading">Revisar</h2>
+          <h2 class="section-heading">Saldo de caja</h2>
+        </div>
+      </div>
+
+      <div class="cash-balance-card">
+        <strong>{{ cash_state.saldo_actual }} €</strong>
+        {% if cash_state.actualizado_en %}
+        <span>Actualizado {{ cash_state.actualizado_en }}</span>
+        {% else %}
+        <span>Sin movimientos de caja registrados</span>
+        {% endif %}
+      </div>
+
+      <div class="home-mini-stats">
+        <div class="home-mini-stat">
+          <span>Productos</span>
+          <strong>{{ home_stats.total_products }}</strong>
+        </div>
+        <div class="home-mini-stat">
+          <span>Stock bajo</span>
+          <strong>{{ home_stats.low_stock }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel home-side-panel">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Productos con stock bajo</h2>
         </div>
       </div>
 
       {% if attention_products %}
-      <div class="home-compact-list">
-        {% for item in attention_products[:3] %}
+      <div class="home-compact-list home-scroll-list">
+        {% for item in attention_products %}
         <a class="home-compact-item" href="{{ item.href }}">
-          <div>
-            <strong>{{ item.grupo_emoji }} {{ item.nombre }}</strong>
-            <div class="activity-meta">{{ item.grupo }}</div>
-          </div>
-          <div class="home-compact-metric">
-            {{ "%.2f"|format(item.stock) }}
-          </div>
+          <strong class="home-compact-title">{{ item.grupo_emoji }} {{ item.nombre }}</strong>
+          <div class="home-compact-inline-meta">{{ item.stock_label }} ({{ item.stock_minimo_label }})</div>
         </a>
         {% endfor %}
       </div>
       {% else %}
       <div class="empty">No hay alertas de stock bajo.</div>
       {% endif %}
+
+      <div class="home-side-panel-actions">
+        <button class="btn btn-primary btn-small" type="button" id="openShoppingListDialog">
+          Generar lista de la compra
+        </button>
+      </div>
     </section>
 
     <section class="panel home-side-panel">
@@ -97,14 +131,13 @@
       </div>
 
       {% if recent_activity %}
-      <div class="home-compact-list">
-        {% for item in recent_activity[:3] %}
-        <a class="home-compact-item" href="{{ item.href }}">
-          <div>
-            <strong>{{ item.icon }} {{ item.title }}</strong>
-            <div class="activity-meta">{{ item.kind }}</div>
-          </div>
-          <div class="home-compact-date">{{ item.date or "-" }}</div>
+      <div class="home-compact-list home-scroll-list">
+        {% for item in recent_activity %}
+        <a class="home-compact-item home-compact-item-activity" href="{{ item.href }}">
+          <strong class="home-compact-kind">{{ item.icon }} {{ item.label }}</strong>
+          <span class="home-compact-user">{{ item.user }}</span>
+          <span class="home-compact-date">{{ item.date or "-" }}</span>
+          <span class="home-compact-delta {{ item.cash_delta_class }}">{{ item.cash_delta }}</span>
         </a>
         {% endfor %}
       </div>
@@ -114,4 +147,265 @@
     </section>
   </aside>
 </div>
+
+<dialog class="shopping-dialog" id="shoppingListDialog">
+  <div class="shopping-dialog-shell">
+    <div class="shopping-dialog-header">
+      <div>
+        <h2 class="section-heading">Generar lista de la compra</h2>
+        <p class="section-subtitle">Los productos con stock bajo aparecen ya seleccionados y marcados en rojo.</p>
+      </div>
+      <button class="btn btn-secondary btn-small" type="button" id="closeShoppingListDialogTop">Cerrar</button>
+    </div>
+
+    <div class="shopping-dialog-body">
+      <section class="shopping-dialog-panel">
+        <div class="shopping-dialog-panel-head">
+          <h3 class="home-group-title">Inventario</h3>
+          <span class="header-count" id="shoppingInventoryCount">0</span>
+        </div>
+        <div class="shopping-dialog-list" id="shoppingInventoryList"></div>
+      </section>
+
+      <section class="shopping-dialog-panel">
+        <div class="shopping-dialog-panel-head">
+          <h3 class="home-group-title">Seleccionados</h3>
+          <span class="header-count" id="shoppingSelectedCount">0</span>
+        </div>
+        <div class="shopping-dialog-list shopping-dialog-selected-list" id="shoppingSelectedList"></div>
+      </section>
+    </div>
+
+    <div class="shopping-dialog-actions">
+      <button class="btn btn-secondary" type="button" id="closeShoppingListDialog">Cancelar</button>
+      <button class="btn btn-primary" type="button" id="printShoppingListButton">Imprimir lista</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  (() => {
+    const products = {{ shopping_products|tojson }};
+    const dialog = document.getElementById("shoppingListDialog");
+    const openButton = document.getElementById("openShoppingListDialog");
+    const closeButtons = [
+      document.getElementById("closeShoppingListDialog"),
+      document.getElementById("closeShoppingListDialogTop"),
+    ].filter(Boolean);
+    const inventoryList = document.getElementById("shoppingInventoryList");
+    const selectedList = document.getElementById("shoppingSelectedList");
+    const inventoryCount = document.getElementById("shoppingInventoryCount");
+    const selectedCount = document.getElementById("shoppingSelectedCount");
+    const printButton = document.getElementById("printShoppingListButton");
+
+    if (!dialog || !openButton || !inventoryList || !selectedList || !printButton) {
+      return;
+    }
+
+    const selectedIds = new Set(
+      products.filter((product) => product.low_stock).map((product) => product.producto_id)
+    );
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function selectedProducts() {
+      return products.filter((product) => selectedIds.has(product.producto_id));
+    }
+
+    function renderInventoryList() {
+      inventoryList.replaceChildren();
+      inventoryCount.textContent = String(products.length);
+
+      if (!products.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No hay productos disponibles.";
+        inventoryList.appendChild(empty);
+        return;
+      }
+
+      products.forEach((product) => {
+        const row = document.createElement("label");
+        row.className = `shopping-row${product.low_stock ? " shopping-row-low" : ""}`;
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedIds.has(product.producto_id);
+        checkbox.dataset.productId = product.producto_id;
+        checkbox.className = "shopping-row-check";
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) {
+            selectedIds.add(product.producto_id);
+          } else {
+            selectedIds.delete(product.producto_id);
+          }
+          renderSelectedList();
+        });
+
+        const body = document.createElement("span");
+        body.className = "shopping-row-body";
+
+        const title = document.createElement("strong");
+        title.className = "shopping-row-title";
+        title.textContent = `${product.grupo_emoji} ${product.nombre}`;
+
+        const meta = document.createElement("span");
+        meta.className = "shopping-row-meta";
+        meta.textContent = `Stock actual ${product.stock_label} · Stock seguridad ${product.stock_minimo_label}`;
+
+        body.append(title, meta);
+        row.append(checkbox, body);
+        inventoryList.appendChild(row);
+      });
+    }
+
+    function renderSelectedList() {
+      selectedList.replaceChildren();
+      const selected = selectedProducts();
+      selectedCount.textContent = String(selected.length);
+      printButton.disabled = selected.length === 0;
+
+      if (!selected.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Selecciona productos desde la columna izquierda.";
+        selectedList.appendChild(empty);
+        return;
+      }
+
+      selected.forEach((product) => {
+        const row = document.createElement("div");
+        row.className = "shopping-selected-item";
+
+        const body = document.createElement("div");
+        body.className = "shopping-selected-body";
+
+        const title = document.createElement("strong");
+        title.className = "shopping-selected-title";
+        title.textContent = `${product.grupo_emoji} ${product.nombre}`;
+
+        const meta = document.createElement("span");
+        meta.className = "shopping-selected-meta";
+        meta.textContent = `Stock actual ${product.stock_label} · Stock seguridad ${product.stock_minimo_label}`;
+
+        body.append(title, meta);
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "btn btn-secondary btn-small";
+        removeButton.textContent = "Quitar";
+        removeButton.addEventListener("click", () => {
+          selectedIds.delete(product.producto_id);
+          const checkbox = Array.from(inventoryList.querySelectorAll("[data-product-id]"))
+            .find((input) => input.dataset.productId === product.producto_id);
+          if (checkbox) checkbox.checked = false;
+          renderSelectedList();
+        });
+
+        row.append(body, removeButton);
+        selectedList.appendChild(row);
+      });
+    }
+
+    function printShoppingList() {
+      const selected = selectedProducts();
+      if (!selected.length) {
+        return;
+      }
+
+      const rows = selected.map((product) => `
+        <tr>
+          <td>${escapeHtml(`${product.grupo_emoji} ${product.nombre}`)}</td>
+          <td>${escapeHtml(product.stock_label)}</td>
+          <td>${escapeHtml(product.stock_minimo_label)}</td>
+        </tr>
+      `).join("");
+
+      const popup = window.open("", "_blank", "width=760,height=860");
+      if (!popup) {
+        window.alert("No se pudo abrir la ventana de impresion.");
+        return;
+      }
+
+      popup.document.write(`
+        <!doctype html>
+        <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <title>Lista de la compra</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              margin: 2rem;
+              color: #111;
+            }
+            h1 {
+              margin: 0 0 1.5rem;
+              font-size: 1.8rem;
+              letter-spacing: 0.04em;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              padding: 0.55rem 0.35rem;
+              border-bottom: 1px solid #d5d5d5;
+              text-align: left;
+              font-size: 0.98rem;
+            }
+            th {
+              font-weight: 700;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>LISTA DE LA COMPRA</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>PRODUCTO</th>
+                <th>STOCK ACTUAL</th>
+                <th>STOCK SEGURIDAD</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+        </html>
+      `);
+      popup.document.close();
+      popup.focus();
+      window.setTimeout(() => {
+        popup.print();
+        window.setTimeout(() => popup.close(), 200);
+      }, 150);
+    }
+
+    openButton.addEventListener("click", () => {
+      renderInventoryList();
+      renderSelectedList();
+      dialog.showModal();
+    });
+
+    closeButtons.forEach((button) => {
+      button.addEventListener("click", () => dialog.close());
+    });
+
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) {
+        dialog.close();
+      }
+    });
+
+    printButton.addEventListener("click", printShoppingList);
+  })();
+</script>
 {% endblock %}

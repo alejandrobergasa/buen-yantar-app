@@ -7,8 +7,22 @@ import io
 import os
 import config
 
-from services.csv_store import ensure_csv
+from services.csv_store import ensure_csv, read_all, write_all_atomic
 from services.audit import AUDIT_HEADERS, log_action, list_logs
+from services.cashbox import (
+    CASHBOX_HEADERS,
+    adjust_cash_balance,
+    ensure_cashbox,
+    get_cash_balance,
+    get_cashbox_state,
+    set_cash_balance,
+)
+from services.free_expenses import (
+    FREE_EXPENSE_CATEGORIES,
+    FREE_EXPENSE_HEADERS,
+    create_free_expense,
+    list_free_expenses,
+)
 from services.auth import (
     ensure_default_admin,
     verify_login,
@@ -54,8 +68,11 @@ def create_app() -> Flask:
     ensure_csv(config.CSV_FACTURAS, INVOICE_HEADERS)
     ensure_csv(config.CSV_FACTURA_LINEAS, INVOICE_LINE_HEADERS)
     ensure_csv(config.CSV_LOGS, AUDIT_HEADERS)
+    ensure_csv(config.CSV_CAJA, CASHBOX_HEADERS)
+    ensure_csv(config.CSV_GASTOS_LIBRES, FREE_EXPENSE_HEADERS)
     ensure_user_schema(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR)
     ensure_product_schema(config.CSV_PRODUCTOS, backup_dir=config.BACKUP_DIR)
+    ensure_cashbox(config.CSV_CAJA)
 
     ensure_default_admin(config.CSV_USUARIOS)
     if os.getenv("LOAD_DEMO_DATA", "0") == "1":
@@ -146,6 +163,18 @@ def create_app() -> Flask:
         except ValueError:
             return 0.0
 
+    def format_compact_number(value: float) -> str:
+        if abs(value - int(value)) < 1e-9:
+            return str(int(value))
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    def extract_note_value(note: str, prefix: str) -> str:
+        for part in (note or "").split("|"):
+            text = part.strip()
+            if text.startswith(prefix):
+                return text[len(prefix):].strip()
+        return ""
+
     def parse_iso_datetime(raw: str) -> datetime | None:
         text = (raw or "").strip()
         if not text:
@@ -191,6 +220,151 @@ def create_app() -> Flask:
         response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
+    def editable_data_sources() -> list[dict[str, object]]:
+        return [
+            {
+                "key": "usuarios",
+                "label": "Usuarios",
+                "description": "Usuarios de acceso, roles y hashes de contrasena.",
+                "path": config.CSV_USUARIOS,
+                "headers": USERS_HEADERS,
+            },
+            {
+                "key": "productos",
+                "label": "Productos",
+                "description": "Catalogo base del inventario.",
+                "path": config.CSV_PRODUCTOS,
+                "headers": PRODUCT_HEADERS,
+            },
+            {
+                "key": "movimientos",
+                "label": "Movimientos inventario",
+                "description": "Entradas, salidas y ajustes de stock.",
+                "path": config.CSV_MOVS,
+                "headers": MOV_HEADERS,
+            },
+            {
+                "key": "facturas",
+                "label": "Facturas",
+                "description": "Cabeceras de facturas emitidas.",
+                "path": config.CSV_FACTURAS,
+                "headers": INVOICE_HEADERS,
+            },
+            {
+                "key": "facturas_lineas",
+                "label": "Lineas de factura",
+                "description": "Detalle de lineas incluidas en cada factura.",
+                "path": config.CSV_FACTURA_LINEAS,
+                "headers": INVOICE_LINE_HEADERS,
+            },
+            {
+                "key": "gastos_libres",
+                "label": "Gastos libres",
+                "description": "Gastos manuales que descuentan caja.",
+                "path": config.CSV_GASTOS_LIBRES,
+                "headers": FREE_EXPENSE_HEADERS,
+            },
+            {
+                "key": "logs",
+                "label": "Logs de uso",
+                "description": "Registro de actividad y respuestas HTTP.",
+                "path": config.CSV_LOGS,
+                "headers": AUDIT_HEADERS,
+            },
+            {
+                "key": "caja",
+                "label": "Saldo de caja",
+                "description": "Estado persistido de la caja general.",
+                "path": config.CSV_CAJA,
+                "headers": CASHBOX_HEADERS,
+            },
+        ]
+
+    def get_editable_data_source(file_key: str) -> dict[str, object] | None:
+        key = (file_key or "").strip().lower()
+        for source in editable_data_sources():
+            if source["key"] == key:
+                return source
+        return None
+
+    def data_editor_context(file_key: str = "") -> dict[str, object]:
+        sources = editable_data_sources()
+        source = get_editable_data_source(file_key) or sources[0]
+        headers = list(source["headers"])
+        rows = read_all(source["path"])
+        if not rows:
+            rows = [{header: "" for header in headers}]
+
+        return {
+            "data_sources": sources,
+            "selected_data_key": source["key"],
+            "selected_data_source": source,
+            "data_headers": headers,
+            "data_rows": rows,
+            "data_row_count": len(rows),
+        }
+
+    def redirect_to_config(anchor: str = ""):
+        target = url_for("configuracion")
+        if anchor:
+            target = f"{target}#{anchor}"
+        return redirect(target)
+
+    def redirect_to_user_area():
+        if user_is_admin():
+            return redirect_to_config("perfil-acceso")
+        return redirect(url_for("gestion_usuarios"))
+
+    def admin_logs_context() -> dict[str, object]:
+        all_logs = list_logs(config.CSV_LOGS, limit=2000)
+        logs = list(all_logs)
+        current_q = (request.args.get("q") or "").strip()
+        current_user = (request.args.get("user") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+        q = current_q.lower()
+        user = current_user.lower()
+
+        if q:
+            logs = [
+                row for row in logs
+                if q in (row.get("accion", "").lower()) or q in (row.get("detalle", "").lower())
+            ]
+        if user:
+            logs = [row for row in logs if user in (row.get("usuario", "").lower())]
+        if current_from or current_to:
+            logs = [
+                row for row in logs
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
+
+        users = sorted({(row.get("usuario") or "").strip() for row in all_logs if (row.get("usuario") or "").strip()})
+        cutoff = datetime.now() - timedelta(hours=24)
+        recent_logs = 0
+        error_logs = 0
+        for row in logs:
+            detail = (row.get("detalle") or "").lower()
+            if "status=4" in detail or "status=5" in detail:
+                error_logs += 1
+            parsed = parse_iso_datetime(row.get("fecha", ""))
+            if parsed and parsed >= cutoff:
+                recent_logs += 1
+
+        return {
+            "logs": logs,
+            "current_q": current_q,
+            "current_user": current_user,
+            "current_from": current_from,
+            "current_to": current_to,
+            "user_options": users,
+            "log_summary": {
+                "shown": len(logs),
+                "users": len({(row.get("usuario") or "").strip() for row in logs if (row.get("usuario") or "").strip()}),
+                "recent": recent_logs,
+                "errors": error_logs,
+            },
+        }
+
     def inventory_snapshot() -> dict[str, int]:
         prods = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
@@ -219,6 +393,8 @@ def create_app() -> Flask:
     def inject_shell_context():
         nav_items = []
         if session.get("user"):
+            settings_href = url_for("configuracion") if getattr(g, "is_admin", False) else url_for("gestion_usuarios")
+            settings_label = "Configuracion" if getattr(g, "is_admin", False) else "Usuario"
             nav_items = [
                 {
                     "label": "Inicio",
@@ -241,19 +417,30 @@ def create_app() -> Flask:
                     "endpoints": {"nueva_compra", "nueva_compra_post", "historial_compras"},
                 },
                 {
-                    "label": "Usuarios",
-                    "href": url_for("gestion_usuarios"),
-                    "endpoints": {"gestion_usuarios", "cambiar_password", "crear_usuario", "eliminar_usuario"},
+                    "label": "Gastos",
+                    "href": url_for("nuevo_gasto_libre"),
+                    "endpoints": {
+                        "nuevo_gasto_libre",
+                        "nuevo_gasto_libre_post",
+                        "historial_gastos_libres",
+                        "export_historial_gastos_libres",
+                    },
+                },
+                {
+                    "label": settings_label,
+                    "href": settings_href,
+                    "endpoints": {
+                        "gestion_usuarios",
+                        "cambiar_password",
+                        "crear_usuario",
+                        "eliminar_usuario",
+                        "configuracion",
+                        "actualizar_saldo_caja",
+                        "actualizar_datos_manualmente",
+                        "supervision",
+                    },
                 },
             ]
-            if getattr(g, "is_admin", False):
-                nav_items.append(
-                    {
-                        "label": "Supervision",
-                        "href": url_for("supervision"),
-                        "endpoints": {"supervision"},
-                    }
-                )
 
         return {
             "shell_nav_items": nav_items,
@@ -315,6 +502,8 @@ def create_app() -> Flask:
         r = require_login()
         if r:
             return r
+        if user_is_admin():
+            return redirect_to_config("usuarios-admin")
         users = list_users(config.CSV_USUARIOS) if user_is_admin() else []
         user_stats = {
             "total": len(users),
@@ -342,13 +531,13 @@ def create_app() -> Flask:
 
         if not verify_login(config.CSV_USUARIOS, username, current_password):
             flash("La contraseña actual no es correcta.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_user_area()
         if len(new_password) < 4:
             flash("La nueva contraseña debe tener al menos 4 caracteres.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_user_area()
         if new_password != repeat_password:
             flash("La nueva contraseña y la repetición no coinciden.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_user_area()
 
         update_password(
             config.CSV_USUARIOS,
@@ -357,7 +546,7 @@ def create_app() -> Flask:
             new_password=new_password,
         )
         flash("Contraseña actualizada ✅")
-        return redirect(url_for("gestion_usuarios"))
+        return redirect_to_user_area()
 
     @app.post("/usuarios/crear")
     def crear_usuario():
@@ -371,19 +560,19 @@ def create_app() -> Flask:
 
         if not username:
             flash("El nombre de usuario es obligatorio.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
         if len(password) < 4:
             flash("La contraseña debe tener al menos 4 caracteres.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         try:
             create_user(config.CSV_USUARIOS, username=username, password=password, rol=role)
         except ValueError as exc:
             flash(str(exc))
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         flash("Usuario creado ✅")
-        return redirect(url_for("gestion_usuarios"))
+        return redirect_to_config("usuarios-admin")
 
     @app.post("/usuarios/eliminar")
     def eliminar_usuario():
@@ -394,27 +583,115 @@ def create_app() -> Flask:
         username = (request.form.get("username") or "").strip()
         if not username:
             flash("Usuario no válido.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         me = (session.get("user") or "").strip().lower()
         if username.lower() == me:
             flash("No puedes desactivar tu propio usuario.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         users = list_users(config.CSV_USUARIOS)
         target = next((u for u in users if (u.get("username") or "").strip().lower() == username.lower()), None)
         if not target:
             flash("Usuario no encontrado.")
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         try:
             delete_user(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR, username=username)
         except ValueError as exc:
             flash(str(exc))
-            return redirect(url_for("gestion_usuarios"))
+            return redirect_to_config("usuarios-admin")
 
         flash("Usuario eliminado 🗑️")
-        return redirect(url_for("gestion_usuarios"))
+        return redirect_to_config("usuarios-admin")
+
+    @app.get("/configuracion")
+    def configuracion():
+        r = require_admin()
+        if r:
+            return r
+
+        users = list_users(config.CSV_USUARIOS)
+        user_stats = {
+            "total": len(users),
+            "admins": sum(1 for row in users if (row.get("rol") or "").strip().lower() == "admin"),
+            "normal": sum(1 for row in users if (row.get("rol") or "normal").strip().lower() != "admin"),
+        }
+        selected_file = (request.args.get("file") or "").strip()
+
+        return render_template(
+            "configuracion.html",
+            title="Configuracion",
+            users=users,
+            user_stats=user_stats,
+            cash_state=get_cashbox_state(config.CSV_CAJA),
+            selected_file=selected_file,
+            **admin_logs_context(),
+            **data_editor_context(selected_file),
+        )
+
+    @app.post("/configuracion/caja")
+    def actualizar_saldo_caja():
+        r = require_admin()
+        if r:
+            return r
+
+        saldo_raw = (request.form.get("saldo_caja") or "").strip()
+        note = (request.form.get("nota") or "").strip()
+        try:
+            new_balance = round(parse_decimal(saldo_raw), 2)
+        except ValueError:
+            flash("Saldo de caja no válido.")
+            return redirect_to_config("saldo-caja")
+
+        previous_balance = get_cash_balance(config.CSV_CAJA)
+        set_cash_balance(
+            config.CSV_CAJA,
+            amount=new_balance,
+            updated_by=session.get("user", ""),
+            note=note,
+        )
+        log_action(
+            config.CSV_LOGS,
+            session.get("user", ""),
+            "AJUSTE CAJA",
+            f"Saldo {previous_balance:.2f} -> {new_balance:.2f}. Nota: {note or '-'}",
+        )
+        flash("Saldo de caja actualizado ✅")
+        return redirect_to_config("saldo-caja")
+
+    @app.post("/configuracion/datos")
+    def actualizar_datos_manualmente():
+        r = require_admin()
+        if r:
+            return r
+
+        file_key = (request.form.get("file_key") or "").strip().lower()
+        source = get_editable_data_source(file_key)
+        if not source:
+            flash("Archivo de datos no válido.")
+            return redirect_to_config("datos-manuales")
+
+        headers = list(source["headers"])
+        row_ids = request.form.getlist("row_id[]")
+        rows: list[dict[str, str]] = []
+        for row_id in row_ids:
+            row = {
+                header: (request.form.get(f"cell__{row_id}__{header}") or "").strip()
+                for header in headers
+            }
+            if not any(value != "" for value in row.values()):
+                continue
+            rows.append(row)
+
+        write_all_atomic(
+            source["path"],
+            rows,
+            headers,
+            backup_dir=config.BACKUP_DIR,
+        )
+        flash(f"Archivo {source['label']} actualizado ✅ ({len(rows)} filas)")
+        return redirect(url_for("configuracion", file=file_key, _anchor="datos-manuales"))
 
     @app.get("/")
     def root():
@@ -428,25 +705,32 @@ def create_app() -> Flask:
 
         snapshot = inventory_snapshot()
         stock_map = calc_stock_by_product(config.CSV_MOVS)
+        products = [
+            p for p in get_products(config.CSV_PRODUCTOS)
+            if p.get("stock_infinito", "0") != "1"
+        ]
         attention_products = []
-        for p in get_products(config.CSV_PRODUCTOS):
-            if p.get("stock_infinito", "0") == "1":
-                continue
+        shopping_products = []
+        for p in products:
             pid = p.get("producto_id", "")
             current_stock = stock_map.get(pid, 0.0)
             stock_min = safe_float(p.get("stock_minimo"))
-            if current_stock >= stock_min:
-                continue
-            attention_products.append({
+            is_low_stock = current_stock < stock_min
+            product_summary = {
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
-                "grupo": p.get("grupo", "Otros"),
                 "grupo_emoji": p.get("grupo_emoji", "📦"),
-                "stock": current_stock,
-                "stock_minimo": stock_min,
-                "href": url_for("inventario", producto_id=pid, low="1"),
-            })
-        attention_products.sort(key=lambda row: (row["stock"] - row["stock_minimo"], row["nombre"].lower()))
+                "stock_label": format_compact_number(current_stock),
+                "stock_minimo_label": format_compact_number(stock_min),
+                "low_stock": is_low_stock,
+                "href": url_for("inventario", producto_id=pid, low="1" if is_low_stock else "0"),
+            }
+            shopping_products.append(product_summary)
+            if not is_low_stock:
+                continue
+            attention_products.append(product_summary)
+        attention_products.sort(key=lambda row: (safe_float(row["stock_label"]) - safe_float(row["stock_minimo_label"]), row["nombre"].lower()))
+        shopping_products.sort(key=lambda row: (0 if row["low_stock"] else 1, row["nombre"].lower()))
 
         invoices = list_invoices(config.CSV_FACTURAS, limit=6)
         if not user_is_admin():
@@ -465,29 +749,44 @@ def create_app() -> Flask:
             product_names=product_names,
             limit=6,
         )
+        free_expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=6)
 
         recent_activity = []
         for inv in invoices:
+            amount = safe_float(inv.get("total_importe"))
             recent_activity.append({
-                "kind": "Factura",
                 "icon": "🧾",
-                "title": inv.get("factura_id", ""),
-                "subtitle": inv.get("cliente") or "Sin cliente",
-                "meta": f"{inv.get('lineas') or '0'} lineas · {inv.get('total_importe') or '0.00'} €",
+                "label": "Factura",
+                "user": (inv.get("usuario") or "").strip() or "-",
                 "date": (inv.get("fecha") or "")[:10],
+                "cash_delta": f"+{amount:.2f} €",
+                "cash_delta_class": "home-compact-delta-positive",
                 "sort_key": inv.get("fecha", ""),
                 "href": url_for("historial_facturas", q=inv.get("factura_id", "")),
             })
         for ticket in tickets:
+            amount = safe_float(ticket.get("total_importe"))
             recent_activity.append({
-                "kind": "Compra",
                 "icon": "🛒",
-                "title": ticket.get("ref_id", ""),
-                "subtitle": ticket.get("proveedor") or "Sin proveedor",
-                "meta": f"{ticket.get('lineas') or '0'} lineas · {ticket.get('total_importe') or '0.00'} €",
+                "label": "Compra",
+                "user": (ticket.get("usuario") or "").strip() or "-",
                 "date": (ticket.get("fecha") or "")[:10],
+                "cash_delta": f"-{amount:.2f} €",
+                "cash_delta_class": "home-compact-delta-negative",
                 "sort_key": ticket.get("fecha", ""),
                 "href": url_for("historial_compras", q=ticket.get("ref_id", "")),
+            })
+        for expense in free_expenses:
+            amount = safe_float(expense.get("importe"))
+            recent_activity.append({
+                "icon": "💸",
+                "label": "Gasto",
+                "user": (expense.get("usuario") or "").strip() or "-",
+                "date": (expense.get("fecha") or "")[:10],
+                "cash_delta": f"-{amount:.2f} €",
+                "cash_delta_class": "home-compact-delta-negative",
+                "sort_key": expense.get("fecha", ""),
+                "href": url_for("historial_gastos_libres", q=expense.get("gasto_id", "")),
             })
         recent_activity.sort(key=lambda row: row.get("sort_key", ""), reverse=True)
 
@@ -495,8 +794,10 @@ def create_app() -> Flask:
             "home.html",
             title="Pantalla principal",
             home_stats=snapshot,
+            cash_state=get_cashbox_state(config.CSV_CAJA),
             recent_activity=recent_activity[:6],
-            attention_products=attention_products[:5],
+            attention_products=attention_products,
+            shopping_products=shopping_products,
         )
 
     # -------- INVENTARIO --------
@@ -551,10 +852,27 @@ def create_app() -> Flask:
 
         selected_stock = None
         selected_purchases = []
+        purchase_recommendation = None
         if selected:
             sel_inf = (selected.get("stock_infinito", "0") == "1")
             selected_stock = None if sel_inf else stock_map.get(producto_id, 0.0)
             selected_purchases = last_purchases_for_product(config.CSV_MOVS, producto_id, limit=300)
+            latest_purchase_price = 0.0
+            latest_purchase_date = ""
+            for movement in selected_purchases:
+                raw_price = extract_note_value(movement.get("nota", ""), "€/u:")
+                price_value = safe_float(raw_price)
+                if price_value > 0:
+                    latest_purchase_price = price_value
+                    latest_purchase_date = (movement.get("fecha") or "")[:10]
+                    break
+            if latest_purchase_price > 0:
+                purchase_recommendation = {
+                    "ultima_compra": latest_purchase_price,
+                    "recomendado": round(latest_purchase_price * 1.2, 2),
+                    "fecha": latest_purchase_date,
+                    "unidad": selected.get("unidad", "ud"),
+                }
 
         inventory_summary = {
             "total_products": len(rows),
@@ -570,6 +888,7 @@ def create_app() -> Flask:
             selected=selected,
             selected_stock=selected_stock,
             selected_purchases=selected_purchases,
+            purchase_recommendation=purchase_recommendation,
             group_options=group_options,
             current_filters=current_filters,
             inventory_summary=inventory_summary,
@@ -886,6 +1205,13 @@ def create_app() -> Flask:
             invoice_date=invoice_date,
             user=session.get("user", ""),
         )
+        if abs(total) > 1e-9:
+            adjust_cash_balance(
+                config.CSV_CAJA,
+                delta=total,
+                updated_by=session.get("user", ""),
+                note=f"Factura {factura_id}",
+            )
         try:
             print_invoice_ticket(factura_id)
             flash("Factura enviada a la impresora conectada.")
@@ -1141,57 +1467,7 @@ def create_app() -> Flask:
         r = require_admin()
         if r:
             return r
-
-        all_logs = list_logs(config.CSV_LOGS, limit=2000)
-        logs = list(all_logs)
-        current_q = (request.args.get("q") or "").strip()
-        current_user = (request.args.get("user") or "").strip()
-        current_from = (request.args.get("from") or "").strip()
-        current_to = (request.args.get("to") or "").strip()
-        q = current_q.lower()
-        user = current_user.lower()
-
-        if q:
-            logs = [
-                row for row in logs
-                if q in (row.get("accion", "").lower()) or q in (row.get("detalle", "").lower())
-            ]
-        if user:
-            logs = [row for row in logs if user in (row.get("usuario", "").lower())]
-        if current_from or current_to:
-            logs = [
-                row for row in logs
-                if matches_date_window(row.get("fecha", ""), current_from, current_to)
-            ]
-
-        users = sorted({(row.get("usuario") or "").strip() for row in all_logs if (row.get("usuario") or "").strip()})
-        cutoff = datetime.now() - timedelta(hours=24)
-        recent_logs = 0
-        error_logs = 0
-        for row in logs:
-            detail = (row.get("detalle") or "").lower()
-            if "status=4" in detail or "status=5" in detail:
-                error_logs += 1
-            parsed = parse_iso_datetime(row.get("fecha", ""))
-            if parsed and parsed >= cutoff:
-                recent_logs += 1
-
-        return render_template(
-            "supervision.html",
-            title="Supervision",
-            logs=logs,
-            current_q=current_q,
-            current_user=current_user,
-            current_from=current_from,
-            current_to=current_to,
-            user_options=users,
-            log_summary={
-                "shown": len(logs),
-                "users": len({(row.get("usuario") or "").strip() for row in logs if (row.get("usuario") or "").strip()}),
-                "recent": recent_logs,
-                "errors": error_logs,
-            },
-        )
+        return redirect_to_config("logs-uso")
 
     @app.get("/supervision/export")
     def export_supervision():
@@ -1199,26 +1475,7 @@ def create_app() -> Flask:
         if r:
             return r
 
-        logs = list(list_logs(config.CSV_LOGS, limit=2000))
-        current_q = (request.args.get("q") or "").strip()
-        current_user = (request.args.get("user") or "").strip()
-        current_from = (request.args.get("from") or "").strip()
-        current_to = (request.args.get("to") or "").strip()
-        q = current_q.lower()
-        user = current_user.lower()
-
-        if q:
-            logs = [
-                row for row in logs
-                if q in (row.get("accion", "").lower()) or q in (row.get("detalle", "").lower())
-            ]
-        if user:
-            logs = [row for row in logs if user in (row.get("usuario", "").lower())]
-        if current_from or current_to:
-            logs = [
-                row for row in logs
-                if matches_date_window(row.get("fecha", ""), current_from, current_to)
-            ]
+        logs = admin_logs_context()["logs"]
 
         rows = [
             {
@@ -1264,6 +1521,7 @@ def create_app() -> Flask:
                 "unidad": unit,
                 "grupo": group_name,
                 "grupo_emoji": group_emoji,
+                "precio_venta_actual": (p.get("precio_unitario") or "").strip(),
                 "stock_infinito": "1" if infinito else "0",
                 "stock_actual": current_stock,
                 "stock_bajo": "1" if (current_stock is not None and current_stock < safe_float(p.get("stock_minimo"))) else "0",
@@ -1380,6 +1638,12 @@ def create_app() -> Flask:
             flash("Añade al menos una línea de compra válida.")
             return redirect_with_list_filters("nueva_compra")
 
+        purchase_total = sum(
+            float(line.get("cantidad") or 0) * float(line.get("precio_compra") or 0)
+            for line in lines
+            if str(line.get("precio_compra") or "").strip()
+        )
+
         ref_id = add_purchase_entries(
             config.CSV_MOVS,
             lines=lines,
@@ -1388,8 +1652,167 @@ def create_app() -> Flask:
             purchase_date=purchase_date,
             user=session.get("user", ""),
         )
+        if abs(purchase_total) > 1e-9:
+            adjust_cash_balance(
+                config.CSV_CAJA,
+                delta=-purchase_total,
+                updated_by=session.get("user", ""),
+                note=f"Compra {ref_id}",
+            )
         flash(f"Compra registrada ✅ ({len(lines)} líneas, ref: {ref_id})")
         return redirect_with_list_filters("nueva_compra")
+
+    @app.get("/gastos/nuevo")
+    def nuevo_gasto_libre():
+        r = require_login()
+        if r:
+            return r
+
+        return render_template(
+            "gasto_nuevo.html",
+            title="Nuevo gasto libre",
+            today_iso=date.today().isoformat(),
+            categories=FREE_EXPENSE_CATEGORIES,
+        )
+
+    @app.post("/gastos/nuevo")
+    def nuevo_gasto_libre_post():
+        r = require_login()
+        if r:
+            return r
+
+        expense_date = (request.form.get("fecha_gasto") or "").strip()
+        category = (request.form.get("categoria") or "").strip()
+        description = (request.form.get("descripcion") or "").strip()
+        amount_raw = (request.form.get("importe") or "").strip()
+
+        if expense_date:
+            try:
+                date.fromisoformat(expense_date)
+            except ValueError:
+                flash("Fecha de gasto no válida.")
+                return redirect(url_for("nuevo_gasto_libre"))
+        else:
+            expense_date = date.today().isoformat()
+
+        if category not in FREE_EXPENSE_CATEGORIES:
+            flash("Categoría de gasto no válida.")
+            return redirect(url_for("nuevo_gasto_libre"))
+
+        if not description:
+            flash("La descripción es obligatoria.")
+            return redirect(url_for("nuevo_gasto_libre"))
+
+        try:
+            amount = round(parse_decimal(amount_raw), 2)
+        except ValueError:
+            flash("Importe no válido.")
+            return redirect(url_for("nuevo_gasto_libre"))
+        if amount <= 0:
+            flash("El importe debe ser mayor que 0.")
+            return redirect(url_for("nuevo_gasto_libre"))
+
+        expense_id, total = create_free_expense(
+            config.CSV_GASTOS_LIBRES,
+            amount=amount,
+            description=description,
+            category=category,
+            expense_date=expense_date,
+            user=session.get("user", ""),
+        )
+        adjust_cash_balance(
+            config.CSV_CAJA,
+            delta=-total,
+            updated_by=session.get("user", ""),
+            note=f"Gasto libre {expense_id}",
+        )
+        flash(f"Gasto libre registrado ✅ ({total:.2f} €, ref: {expense_id})")
+        return redirect(url_for("nuevo_gasto_libre"))
+
+    @app.get("/gastos/historial")
+    def historial_gastos_libres():
+        r = require_login()
+        if r:
+            return r
+
+        expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=500)
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+
+        query = current_q.lower()
+        if query:
+            expenses = [
+                row for row in expenses
+                if query in (row.get("gasto_id", "").lower())
+                or query in (row.get("descripcion", "").lower())
+                or query in (row.get("categoria", "").lower())
+                or query in (row.get("usuario", "").lower())
+            ]
+        if current_from or current_to:
+            expenses = [
+                row for row in expenses
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
+
+        history_summary = {
+            "shown": len(expenses),
+            "amount": sum(safe_float(row.get("importe")) for row in expenses),
+            "users": len({(row.get("usuario") or "").strip() for row in expenses if (row.get("usuario") or "").strip()}),
+        }
+
+        return render_template(
+            "gastos_historial.html",
+            title="Historial de gastos libres",
+            expenses=expenses,
+            current_q=current_q,
+            current_from=current_from,
+            current_to=current_to,
+            history_summary=history_summary,
+        )
+
+    @app.get("/gastos/historial/export")
+    def export_historial_gastos_libres():
+        r = require_login()
+        if r:
+            return r
+
+        expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=500)
+        current_q = (request.args.get("q") or "").strip()
+        current_from = (request.args.get("from") or "").strip()
+        current_to = (request.args.get("to") or "").strip()
+
+        query = current_q.lower()
+        if query:
+            expenses = [
+                row for row in expenses
+                if query in (row.get("gasto_id", "").lower())
+                or query in (row.get("descripcion", "").lower())
+                or query in (row.get("categoria", "").lower())
+                or query in (row.get("usuario", "").lower())
+            ]
+        if current_from or current_to:
+            expenses = [
+                row for row in expenses
+                if matches_date_window(row.get("fecha", ""), current_from, current_to)
+            ]
+
+        rows = [
+            {
+                "fecha": row.get("fecha", ""),
+                "gasto_id": row.get("gasto_id", ""),
+                "categoria": row.get("categoria", ""),
+                "descripcion": row.get("descripcion", ""),
+                "importe": row.get("importe", ""),
+                "usuario": row.get("usuario", ""),
+            }
+            for row in expenses
+        ]
+        return make_csv_response(
+            "gastos_libres_filtrados.csv",
+            ["fecha", "gasto_id", "categoria", "descripcion", "importe", "usuario"],
+            rows,
+        )
 
     return app
 

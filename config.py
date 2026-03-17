@@ -12,6 +12,8 @@ CSV_MOVS = DATA_DIR / "movimientos_inventario.csv"
 CSV_FACTURAS = DATA_DIR / "facturas.csv"
 CSV_FACTURA_LINEAS = DATA_DIR / "facturas_lineas.csv"
 CSV_LOGS = DATA_DIR / "logs_acciones.csv"
+CSV_CAJA = DATA_DIR / "caja.csv"
+CSV_GASTOS_LIBRES = DATA_DIR / "gastos_libres.csv"
 PRINT_JOBS_DIR = DATA_DIR / "print_jobs"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-cambia-esto")

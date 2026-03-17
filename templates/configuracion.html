@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Configuracion</h1>
+    <div class="toolbar-inline">
+      <span class="status-pill status-pill-soft">Administrador</span>
+      <span class="status-pill status-pill-soft">{{ session.get("user") }}</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel settings-shortcuts">
+  <div class="settings-shortcuts-grid">
+    <a class="action-card action-card-short" href="#saldo-caja"><h2>Configurar saldo de caja</h2></a>
+    <a class="action-card action-card-short" href="#usuarios-admin"><h2>Configurar usuarios</h2></a>
+    <a class="action-card action-card-short" href="#logs-uso"><h2>Revisar logs de uso</h2></a>
+    <a class="action-card action-card-short" href="#datos-manuales"><h2>Editar archivos de datos</h2></a>
+  </div>
+</section>
+
+<div class="settings-grid">
+  <div class="settings-stack">
+    <section class="panel" id="saldo-caja">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Saldo de caja</h2>
+          <div class="activity-meta">Las facturas suman y las compras o gastos libres restan automáticamente.</div>
+        </div>
+      </div>
+
+      <div class="cash-balance-card cash-balance-card-admin">
+        <strong>{{ cash_state.saldo_actual }} €</strong>
+        {% if cash_state.actualizado_en %}
+        <span>Ultima actualizacion: {{ cash_state.actualizado_en }}{% if cash_state.actualizado_por %} · {{ cash_state.actualizado_por }}{% endif %}</span>
+        {% else %}
+        <span>Saldo inicial pendiente de definir</span>
+        {% endif %}
+        {% if cash_state.nota %}
+        <div class="help">Nota: {{ cash_state.nota }}</div>
+        {% endif %}
+      </div>
+
+      <form method="post" action="{{ url_for('actualizar_saldo_caja') }}" class="form">
+        <div class="grid-2">
+          <div>
+            <label class="label">Saldo actual</label>
+            <input class="input" name="saldo_caja" value="{{ cash_state.saldo_actual }}" placeholder="0.00" required>
+          </div>
+          <div>
+            <label class="label">Nota</label>
+            <input class="input" name="nota" placeholder="Motivo del ajuste manual">
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Guardar saldo</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel" id="perfil-acceso">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Tu acceso</h2>
+        </div>
+      </div>
+
+      <form method="post" action="{{ url_for('cambiar_password') }}" class="form">
+        <div class="grid-2">
+          <div>
+            <label class="label">Contraseña actual</label>
+            <input class="input" type="password" name="password_actual" required>
+          </div>
+          <div>
+            <label class="label">Nueva contraseña</label>
+            <input class="input" type="password" name="password_nueva" required>
+          </div>
+        </div>
+        <div>
+          <label class="label">Repetir nueva contraseña</label>
+          <input class="input" type="password" name="password_repetir" required>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Actualizar contraseña</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <aside class="settings-side">
+    <section class="panel">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Resumen</h2>
+        </div>
+      </div>
+
+      <div class="home-mini-stats">
+        <div class="home-mini-stat">
+          <span>Usuarios totales</span>
+          <strong>{{ user_stats.total }}</strong>
+        </div>
+        <div class="home-mini-stat">
+          <span>Administradores</span>
+          <strong>{{ user_stats.admins }}</strong>
+        </div>
+        <div class="home-mini-stat">
+          <span>Logs visibles</span>
+          <strong>{{ log_summary.shown }}</strong>
+        </div>
+        <div class="home-mini-stat">
+          <span>Errores 4xx/5xx</span>
+          <strong>{{ log_summary.errors }}</strong>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<section class="panel table-card" id="usuarios-admin">
+  <div class="section-head compact-head">
+    <h2 class="section-heading">Gestion de usuarios</h2>
+  </div>
+
+  <div class="settings-user-layout">
+    <form method="post" action="{{ url_for('crear_usuario') }}" class="form">
+      <div class="grid-2">
+        <div>
+          <label class="label">Usuario</label>
+          <input class="input" name="username" required>
+        </div>
+        <div>
+          <label class="label">Contraseña inicial</label>
+          <input class="input" type="password" name="password" required>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <label class="label">Rol</label>
+          <select name="rol">
+            <option value="normal">Normal</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </div>
+        <div class="actions actions-end">
+          <button class="btn btn-primary" type="submit">Dar de alta</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="inv-scrollbox" style="max-height:46vh;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Rol</th>
+            <th>Accion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.username }}</td>
+            <td>
+              {% if (u.rol or "normal") == "admin" %}
+              <span class="badge badge-ok">Administrador</span>
+              {% else %}
+              <span class="badge">Normal</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.username == session.get("user") %}
+              <span class="help">Tu usuario actual</span>
+              {% else %}
+              <form method="post" action="{{ url_for('eliminar_usuario') }}" onsubmit="return confirm('¿Eliminar este usuario?')">
+                <input type="hidden" name="username" value="{{ u.username }}">
+                <button class="btn btn-secondary btn-small" type="submit">Eliminar</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="panel table-card" id="logs-uso">
+  <div class="section-head compact-head">
+    <h2 class="section-heading">Logs de uso</h2>
+  </div>
+
+  <form method="get" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Buscar accion</label>
+        <input class="input" name="q" value="{{ current_q }}" placeholder="Ej: /facturas/nueva o status=200">
+      </div>
+      <div>
+        <label class="label">Usuario</label>
+        <select name="user">
+          <option value="">(Todos)</option>
+          {% for u in user_options %}
+          <option value="{{ u }}" {% if current_user == u %}selected{% endif %}>{{ u }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <label class="label">Desde</label>
+        <input class="input" type="date" name="from" value="{{ current_from }}">
+      </div>
+      <div>
+        <label class="label">Hasta</label>
+        <input class="input" type="date" name="to" value="{{ current_to }}">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
+      <a class="btn btn-secondary" href="{{ url_for('configuracion') }}#logs-uso">Limpiar</a>
+    </div>
+  </form>
+
+  {% if not logs %}
+  <div class="empty">No hay registros para los filtros actuales.</div>
+  {% else %}
+  <div class="inv-scrollbox" style="max-height:68vh;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Fecha y hora</th>
+          <th>Usuario</th>
+          <th>Accion</th>
+          <th>Estado</th>
+          <th>Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in logs %}
+        {% set detail = (row.detalle or '') %}
+        {% set detail_lower = detail.lower() %}
+        <tr>
+          <td>{{ row.fecha }}</td>
+          <td>{{ row.usuario }}</td>
+          <td>{{ row.accion }}</td>
+          <td>
+            {% if 'status=5' in detail_lower %}
+            <span class="badge badge-danger">5xx</span>
+            {% elif 'status=4' in detail_lower %}
+            <span class="badge badge-warn">4xx</span>
+            {% else %}
+            <span class="badge badge-ok">OK</span>
+            {% endif %}
+          </td>
+          <td>{{ row.detalle }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel table-card" id="datos-manuales">
+  <div class="section-head compact-head">
+    <div>
+      <h2 class="section-heading">Editar archivos de datos manualmente</h2>
+      <div class="activity-meta">Puedes anadir, borrar o modificar filas libremente. Se guarda copia de seguridad antes de escribir.</div>
+    </div>
+  </div>
+
+  <form method="get" action="{{ url_for('configuracion') }}" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Archivo CSV</label>
+        <select name="file">
+          {% for source in data_sources %}
+          <option value="{{ source.key }}" {% if selected_data_key == source.key %}selected{% endif %}>{{ source.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="actions actions-end">
+        <button class="btn btn-primary" type="submit">Abrir archivo</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="settings-data-meta">
+    <span class="status-pill status-pill-soft">{{ selected_data_source.label }}</span>
+    <span class="help">{{ selected_data_source.description }}</span>
+  </div>
+
+  <form method="post" action="{{ url_for('actualizar_datos_manualmente') }}" class="form" id="dataEditorForm">
+    <input type="hidden" name="file_key" value="{{ selected_data_key }}">
+    <div class="toolbar-inline actions-end">
+      <button class="btn btn-secondary btn-small" type="button" id="dataEditorAddRow">Anadir fila</button>
+      <button class="btn btn-primary btn-small" type="submit">Guardar cambios</button>
+    </div>
+
+    <div class="inv-scrollbox settings-data-box">
+      <table class="table settings-data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            {% for header in data_headers %}
+            <th>{{ header }}</th>
+            {% endfor %}
+            <th>Accion</th>
+          </tr>
+        </thead>
+        <tbody id="dataEditorRows">
+          {% for row in data_rows %}
+          {% set rid = loop.index0 %}
+          <tr class="settings-data-row">
+            <td class="settings-data-index">
+              <span class="settings-data-index-label">{{ loop.index }}</span>
+              <input type="hidden" name="row_id[]" value="{{ rid }}">
+            </td>
+            {% for header in data_headers %}
+            <td>
+              <input class="input settings-data-input" name="cell__{{ rid }}__{{ header }}" value="{{ row.get(header, '') }}">
+            </td>
+            {% endfor %}
+            <td>
+              <button class="btn btn-secondary btn-small data-row-remove" type="button">Eliminar</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+</section>
+
+<template id="dataEditorRowTpl">
+  <tr class="settings-data-row">
+    <td class="settings-data-index"><span class="settings-data-index-label">__DISPLAY__</span>
+      <input type="hidden" name="row_id[]" value="__ROW_ID__">
+    </td>
+    {% for header in data_headers %}
+    <td>
+      <input class="input settings-data-input" name="cell____ROW_ID____{{ header }}" value="">
+    </td>
+    {% endfor %}
+    <td>
+      <button class="btn btn-secondary btn-small data-row-remove" type="button">Eliminar</button>
+    </td>
+  </tr>
+</template>
+
+<script>
+  (function () {
+    const rowBody = document.getElementById("dataEditorRows");
+    const addBtn = document.getElementById("dataEditorAddRow");
+    const rowTpl = document.getElementById("dataEditorRowTpl");
+    if (!rowBody || !addBtn || !rowTpl) return;
+
+    let nextRowId = rowBody.querySelectorAll(".settings-data-row").length;
+
+    function refreshRowLabels() {
+      rowBody.querySelectorAll(".settings-data-row").forEach((row, index) => {
+        const indexCell = row.querySelector(".settings-data-index-label");
+        if (!indexCell) return;
+        const hidden = row.querySelector('.settings-data-index input[name="row_id[]"]');
+        indexCell.textContent = String(index + 1);
+        if (hidden && !hidden.value) hidden.value = String(index);
+      });
+    }
+
+    function attachRemove(button) {
+      button.addEventListener("click", () => {
+        const rows = rowBody.querySelectorAll(".settings-data-row");
+        if (rows.length <= 1) {
+          rows[0].querySelectorAll(".settings-data-input").forEach((input) => {
+            input.value = "";
+          });
+          return;
+        }
+        button.closest(".settings-data-row")?.remove();
+        refreshRowLabels();
+      });
+    }
+
+    rowBody.querySelectorAll(".data-row-remove").forEach(attachRemove);
+
+    addBtn.addEventListener("click", () => {
+      const html = rowTpl.innerHTML
+        .replaceAll("__ROW_ID__", String(nextRowId))
+        .replace("__DISPLAY__", String(rowBody.querySelectorAll(".settings-data-row").length + 1));
+      nextRowId += 1;
+      rowBody.insertAdjacentHTML("beforeend", html);
+      const row = rowBody.querySelector(".settings-data-row:last-child");
+      const removeBtn = row?.querySelector(".data-row-remove");
+      if (removeBtn) attachRemove(removeBtn);
+      row?.querySelector(".settings-data-input")?.focus();
+      refreshRowLabels();
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Historial de gastos libres</h1>
+  </div>
+</section>
+
+<section class="panel">
+  <form method="get" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Buscar</label>
+        <input class="input" name="q" value="{{ current_q }}" placeholder="Referencia, descripcion, categoria o usuario">
+      </div>
+      <div class="grid-2">
+        <div>
+          <label class="label">Desde</label>
+          <input class="input" type="date" name="from" value="{{ current_from }}">
+        </div>
+        <div>
+          <label class="label">Hasta</label>
+          <input class="input" type="date" name="to" value="{{ current_to }}">
+        </div>
+      </div>
+    </div>
+    <div class="actions actions-end">
+      <button class="btn btn-primary" type="submit">Filtrar</button>
+      <a class="btn btn-secondary" href="{{ url_for('export_historial_gastos_libres', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
+      <a class="btn btn-secondary" href="{{ url_for('historial_gastos_libres') }}">Limpiar</a>
+    </div>
+  </form>
+</section>
+
+<section class="panel table-card">
+  {% if not expenses %}
+  <div class="empty">No hay gastos libres que mostrar con los filtros actuales.</div>
+  {% else %}
+  <div class="inv-scrollbox" style="max-height:70vh;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Referencia</th>
+          <th>Fecha</th>
+          <th>Categoria</th>
+          <th>Descripcion</th>
+          <th>Usuario</th>
+          <th class="right">Importe</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in expenses %}
+        <tr>
+          <td>
+            <div class="cell-inline">
+              <strong>{{ row.gasto_id }}</strong>
+              <button class="copy-btn" type="button" data-copy-text="{{ row.gasto_id }}">Copiar</button>
+            </div>
+          </td>
+          <td>{{ (row.fecha or "")[:10] }}</td>
+          <td>{{ row.categoria }}</td>
+          <td>{{ row.descripcion }}</td>
+          <td>{{ row.usuario or "-" }}</td>
+          <td class="right">{{ row.importe }} €</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<script>
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const helper = document.createElement("textarea");
+    helper.value = text;
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    document.execCommand("copy");
+    helper.remove();
+  }
+
+  document.querySelectorAll("[data-copy-text]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const original = button.textContent;
+      try {
+        await copyText(button.dataset.copyText || "");
+        button.textContent = "Copiado";
+      } catch (error) {
+        button.textContent = "No se pudo";
+      }
+      window.setTimeout(() => {
+        button.textContent = original;
+      }, 1400);
+    });
+  });
+</script>
+{% endblock %}

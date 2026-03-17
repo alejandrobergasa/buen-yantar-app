@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel page-intro page-header-bar">
+  <div class="page-header-main">
+    <h1 class="page-title page-title-left">Nuevo gasto libre</h1>
+    <a class="btn btn-secondary btn-small" href="{{ url_for('historial_gastos_libres') }}">Historial</a>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head compact-head">
+    <div>
+      <h2 class="section-heading">Registrar gasto</h2>
+      <div class="activity-meta">No imprime ticket y descuenta el importe directamente del saldo de caja.</div>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('nuevo_gasto_libre_post') }}" class="form">
+    <div class="grid-2">
+      <div>
+        <label class="label">Fecha</label>
+        <input class="input" type="date" name="fecha_gasto" value="{{ today_iso }}" required>
+      </div>
+      <div>
+        <label class="label">Categoria</label>
+        <select name="categoria" required>
+          {% for category in categories %}
+          <option value="{{ category }}">{{ category }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="label">Importe</label>
+        <input class="input input-num" name="importe" placeholder="0.00" required>
+      </div>
+      <div>
+        <label class="label">Descripcion</label>
+        <input class="input" name="descripcion" placeholder="Ej: Productos de limpieza del local" required>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">Registrar gasto</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
