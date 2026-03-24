@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
-from uuid import uuid4
 
 from .csv_store import append_rows, read_all
+from .ids import short_id
 
 AUDIT_HEADERS = [
     "log_id",
@@ -27,7 +27,7 @@ def log_action(
     detalle: str = "",
 ) -> None:
     row = {
-        "log_id": str(uuid4()),
+        "log_id": short_id(),
         "fecha": now_iso(),
         "usuario": (usuario or "").strip() or "anon",
         "accion": (accion or "").strip(),

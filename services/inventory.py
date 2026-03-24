@@ -2,30 +2,121 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-from uuid import uuid4
 import random
 import math
 
 import csv
 
 from .csv_store import read_all, append_rows, write_all_atomic
+from .ids import prefixed_id, short_id
 
-# NUEVO: stock_infinito ("1" => infinito, "0" => normal)
+# Campos de producto:
+# - unidad: unidad de compra / stock
+# - unidad_venta: unidad usada al facturar
+# - fracciones_por_unidad: cuantas unidades de venta caben en una unidad de stock
 PRODUCT_HEADERS = [
     "producto_id", "nombre", "precio_unitario", "unidad",
     "stock_minimo", "grupo", "grupo_emoji",
     "stock_infinito",
+    "fraccionable", "fracciones_por_unidad", "unidad_venta",
     "activo"
 ]
 
 MOV_HEADERS = ["mov_id", "fecha", "producto_id", "tipo", "cantidad", "origen", "ref_id", "nota"]
 
+TRUTHY_VALUES = {"1", "true", "True", "on", "yes", "si", "sí"}
+
+
+def _format_number(value: float, decimals: int = 4) -> str:
+    if abs(value - int(value)) < 1e-9:
+        return str(int(value))
+    return f"{value:.{decimals}f}".rstrip("0").rstrip(".")
+
+
+def _parse_fraction_count(raw: object) -> float:
+    try:
+        value = float(str(raw or "").strip().replace(",", "."))
+    except ValueError:
+        return 1.0
+    return value if value > 0 else 1.0
+
+
+def _normalize_product_row(row: Dict[str, str]) -> Dict[str, str]:
+    stock_unit = (row.get("unidad") or "ud").strip() or "ud"
+    fraction_count = _parse_fraction_count(row.get("fracciones_por_unidad"))
+    fractional = (row.get("fraccionable") or "").strip() in TRUTHY_VALUES and fraction_count > 0
+    sale_unit_raw = (row.get("unidad_venta") or "").strip()
+    sale_unit = sale_unit_raw or stock_unit
+
+    normalized = dict(row)
+    normalized.update({
+        "precio_unitario": (row.get("precio_unitario") or "").strip(),
+        "unidad": stock_unit,
+        "stock_minimo": (row.get("stock_minimo") or "0").strip() or "0",
+        "grupo": (row.get("grupo") or "Otros").strip() or "Otros",
+        "grupo_emoji": (row.get("grupo_emoji") or "📦").strip() or "📦",
+        "stock_infinito": "1" if (row.get("stock_infinito") or "").strip() in TRUTHY_VALUES else "0",
+        "fraccionable": "1" if fractional else "0",
+        "fracciones_por_unidad": _format_number(fraction_count),
+        "unidad_venta": sale_unit if fractional else stock_unit,
+        "activo": "0" if (row.get("activo") or "").strip() == "0" else "1",
+    })
+    return normalized
+
+
+def product_is_fractionable(product: Dict[str, str]) -> bool:
+    return _normalize_product_row(product).get("fraccionable") == "1"
+
+
+def product_fraction_count(product: Dict[str, str]) -> float:
+    normalized = _normalize_product_row(product)
+    return _parse_fraction_count(normalized.get("fracciones_por_unidad"))
+
+
+def product_sale_unit(product: Dict[str, str]) -> str:
+    normalized = _normalize_product_row(product)
+    return (normalized.get("unidad_venta") or normalized.get("unidad") or "ud").strip() or "ud"
+
+
+def sale_quantity_to_stock_quantity(product: Dict[str, str], sale_quantity: float) -> float:
+    if not product_is_fractionable(product):
+        return sale_quantity
+    return sale_quantity / product_fraction_count(product)
+
+
+def stock_quantity_to_sale_quantity(product: Dict[str, str], stock_quantity: float) -> float:
+    if not product_is_fractionable(product):
+        return stock_quantity
+    return stock_quantity * product_fraction_count(product)
+
+
+def purchase_price_breakdown(product: Dict[str, str], quantity: float, entered_price: float) -> Dict[str, float]:
+    qty = max(float(quantity or 0), 0.0)
+    price = max(float(entered_price or 0), 0.0)
+
+    if product_is_fractionable(product):
+        line_total = round(price, 2)
+        unit_purchase_price = (price / qty) if qty > 0 else 0.0
+        sale_unit_purchase_price = unit_purchase_price / product_fraction_count(product)
+    else:
+        line_total = round(qty * price, 2)
+        unit_purchase_price = price
+        sale_unit_purchase_price = price
+
+    return {
+        "line_total": line_total,
+        "unit_purchase_price": unit_purchase_price,
+        "sale_unit_purchase_price": sale_unit_purchase_price,
+        "recommended_sale_price": round(sale_unit_purchase_price * 1.2, 2),
+    }
+
 
 def ensure_product_schema(productos_csv: Path, backup_dir: Optional[Path] = None) -> None:
     """
-    Migra productos.csv al esquema esperado (incluye stock_infinito).
+    Migra productos.csv al esquema esperado.
     Soporta:
     - CSV legado sin columna stock_infinito.
+    - CSV previos a productos fraccionables.
     - Filas desalineadas por escrituras previas con cabecera antigua.
     """
     if not productos_csv.exists() or productos_csv.stat().st_size == 0:
@@ -56,7 +147,7 @@ def ensure_product_schema(productos_csv: Path, backup_dir: Optional[Path] = None
             stock_infinito = raw_stock_inf if raw_stock_inf in {"0", "1"} else "0"
             activo = raw_activo if raw_activo in {"0", "1"} else "1"
 
-        migrated.append({
+        migrated.append(_normalize_product_row({
             "producto_id": (r.get("producto_id") or "").strip(),
             "nombre": (r.get("nombre") or "").strip(),
             "precio_unitario": (r.get("precio_unitario") or "").strip(),
@@ -65,8 +156,11 @@ def ensure_product_schema(productos_csv: Path, backup_dir: Optional[Path] = None
             "grupo": (r.get("grupo") or "Otros").strip() or "Otros",
             "grupo_emoji": (r.get("grupo_emoji") or "📦").strip() or "📦",
             "stock_infinito": stock_infinito,
+            "fraccionable": (r.get("fraccionable") or "").strip(),
+            "fracciones_por_unidad": (r.get("fracciones_por_unidad") or "").strip() or "1",
+            "unidad_venta": (r.get("unidad_venta") or "").strip(),
             "activo": activo,
-        })
+        }))
 
     write_all_atomic(productos_csv, migrated, PRODUCT_HEADERS, backup_dir=backup_dir)
 
@@ -120,7 +214,7 @@ def ensure_demo_products(productos_csv: Path) -> None:
         infinito = "1" if random.random() < 0.08 else "0"
 
         demo.append({
-            "producto_id": str(uuid4()),
+            "producto_id": short_id(),
             "nombre": (base + suf),
             "precio_unitario": f"{precio:.2f}",
             "unidad": unidad,
@@ -128,18 +222,27 @@ def ensure_demo_products(productos_csv: Path) -> None:
             "grupo": grupo,
             "grupo_emoji": emoji,
             "stock_infinito": infinito,
+            "fraccionable": "0",
+            "fracciones_por_unidad": "1",
+            "unidad_venta": unidad,
             "activo": "1",
         })
 
     append_rows(productos_csv, demo, PRODUCT_HEADERS)
 
 def get_products(productos_csv: Path) -> List[Dict[str, str]]:
-    return [p for p in read_all(productos_csv) if p.get("activo", "1") == "1"]
+    products: List[Dict[str, str]] = []
+    for row in read_all(productos_csv):
+        normalized = _normalize_product_row(row)
+        if normalized.get("activo", "1") == "1":
+            products.append(normalized)
+    return products
 
 def find_product(productos_csv: Path, producto_id: str) -> Optional[Dict[str, str]]:
     for p in read_all(productos_csv):
-        if p.get("producto_id") == producto_id and p.get("activo", "1") == "1":
-            return p
+        normalized = _normalize_product_row(p)
+        if normalized.get("producto_id") == producto_id and normalized.get("activo", "1") == "1":
+            return normalized
     return None
 
 def create_product(
@@ -151,9 +254,12 @@ def create_product(
     grupo: str,
     grupo_emoji: str,
     stock_infinito: str,
+    fraccionable: str = "0",
+    fracciones_por_unidad: str = "1",
+    unidad_venta: str = "",
 ) -> str:
-    pid = str(uuid4())
-    row = {
+    pid = short_id()
+    row = _normalize_product_row({
         "producto_id": pid,
         "nombre": nombre.strip(),
         "precio_unitario": (precio_unitario or "").strip(),
@@ -161,9 +267,12 @@ def create_product(
         "stock_minimo": (stock_minimo or "0").strip(),
         "grupo": (grupo or "Otros").strip(),
         "grupo_emoji": (grupo_emoji or "📦").strip(),
-        "stock_infinito": "1" if (stock_infinito or "").strip() in ["1", "true", "True", "on"] else "0",
+        "stock_infinito": "1" if (stock_infinito or "").strip() in TRUTHY_VALUES else "0",
+        "fraccionable": fraccionable,
+        "fracciones_por_unidad": fracciones_por_unidad,
+        "unidad_venta": unidad_venta,
         "activo": "1",
-    }
+    })
     append_rows(productos_csv, [row], PRODUCT_HEADERS)
     return pid
 
@@ -176,6 +285,9 @@ def update_product_fields(productos_csv: Path, backup_dir: Path, producto_id: st
                 if k in r:
                     r[k] = v
                     changed = True
+            if changed:
+                normalized = _normalize_product_row(r)
+                r.update({key: normalized.get(key, "") for key in PRODUCT_HEADERS})
             break
     if changed:
         write_all_atomic(productos_csv, rows, PRODUCT_HEADERS, backup_dir=backup_dir)
@@ -210,7 +322,9 @@ def last_purchases_for_product(movs_csv: Path, producto_id: str, limit: int = 20
     for m in read_all(movs_csv):
         if m.get("producto_id") != producto_id:
             continue
-        if (m.get("tipo") or "").strip().upper() != "ENTRADA":
+        tipo = (m.get("tipo") or "").strip().upper()
+        origen = (m.get("origen") or "").strip().upper()
+        if origen != "COMPRA" or tipo not in {"ENTRADA", "INFO"}:
             continue
         rows.append(m)
     rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
@@ -218,7 +332,7 @@ def last_purchases_for_product(movs_csv: Path, producto_id: str, limit: int = 20
 
 def add_adjustment(movs_csv: Path, producto_id: str, delta: float, nota: str = "Ajuste manual") -> None:
     row = {
-        "mov_id": str(uuid4()),
+        "mov_id": short_id(),
         "fecha": now_iso(),
         "producto_id": producto_id,
         "tipo": "AJUSTE",
@@ -249,8 +363,7 @@ def add_purchase_entries(
     Registra una compra con 1..N líneas como movimientos ENTRADA y devuelve ref_id.
     Cada elemento de lines debe incluir: producto_id, cantidad y opcionalmente nota/precio_compra.
     """
-    ts = datetime.now().strftime("%Y%m%d%H%M%S")
-    ref_id = f"CP-{ts}-{str(uuid4())[:8]}"
+    ref_id = prefixed_id("CP")
 
     provider = (provider or "").strip()
     global_note = (global_note or "").strip()
@@ -273,6 +386,7 @@ def add_purchase_entries(
         cantidad = str(line.get("cantidad") or "").strip()
         precio_compra = str(line.get("precio_compra") or "").strip()
         nota_linea = (line.get("nota") or "").strip()
+        stock_infinito = (line.get("stock_infinito") or "").strip() == "1"
 
         note_parts: List[str] = []
         if user:
@@ -287,10 +401,10 @@ def add_purchase_entries(
             note_parts.append(nota_linea)
 
         rows.append({
-            "mov_id": str(uuid4()),
+            "mov_id": short_id(),
             "fecha": move_ts,
             "producto_id": producto_id,
-            "tipo": "ENTRADA",
+            "tipo": "INFO" if stock_infinito else "ENTRADA",
             "cantidad": cantidad,
             "origen": "COMPRA",
             "ref_id": ref_id,

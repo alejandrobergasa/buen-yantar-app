@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g, Response
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g, Response, jsonify
 from datetime import date, datetime, timedelta
 import csv
 import io
 import os
 import config
 
-from services.csv_store import ensure_csv, read_all, write_all_atomic
+from services.csv_store import ensure_csv, read_all
 from services.audit import AUDIT_HEADERS, log_action, list_logs
 from services.cashbox import (
     CASHBOX_HEADERS,
@@ -17,10 +17,17 @@ from services.cashbox import (
     get_cashbox_state,
     set_cash_balance,
 )
+from services.cash_analysis import (
+    rebuild_cash_analysis_files,
+    list_cash_detail_rows,
+    cash_detail_summary,
+    cash_annual_summary,
+)
 from services.free_expenses import (
     FREE_EXPENSE_CATEGORIES,
     FREE_EXPENSE_HEADERS,
     create_free_expense,
+    free_expense_category_label,
     list_free_expenses,
 )
 from services.auth import (
@@ -43,14 +50,19 @@ from services.inventory import (
     get_products, find_product,
     calc_stock_by_product, last_purchases_for_product,
     update_product_fields, set_stock_to_value,
-    create_product, add_purchase_entries
+    create_product, add_purchase_entries,
+    product_is_fractionable, product_fraction_count, product_sale_unit,
+    sale_quantity_to_stock_quantity, stock_quantity_to_sale_quantity,
+    purchase_price_breakdown,
 )
 from services.invoices import (
     INVOICE_HEADERS, INVOICE_LINE_HEADERS,
     create_invoice, list_invoices, list_invoice_lines,
     find_invoice, list_invoice_lines_for,
 )
-from services.receipt_printer import format_invoice_ticket, print_text_ticket
+from services.receipt_printer import format_invoice_ticket, format_shopping_list_ticket, print_text_ticket
+from services.excel_export import build_cash_detail_workbook
+from services.pdf_export import build_markdown_pdf
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -77,6 +89,19 @@ def create_app() -> Flask:
     ensure_default_admin(config.CSV_USUARIOS)
     if os.getenv("LOAD_DEMO_DATA", "0") == "1":
         ensure_demo_products(config.CSV_PRODUCTOS)
+
+    def refresh_cash_analysis_storage() -> dict[str, object]:
+        return rebuild_cash_analysis_files(
+            cashbox_csv=config.CSV_CAJA,
+            invoices_csv=config.CSV_FACTURAS,
+            inventory_movs_csv=config.CSV_MOVS,
+            expenses_csv=config.CSV_GASTOS_LIBRES,
+            logs_csv=config.CSV_LOGS,
+            cash_movements_csv=config.CSV_CAJA_MOVIMIENTOS,
+            cash_daily_csv=config.CSV_CAJA_HISTORIAL,
+        )
+
+    refresh_cash_analysis_storage()
 
     def require_login():
         if not session.get("user"):
@@ -168,6 +193,30 @@ def create_app() -> Flask:
             return str(int(value))
         return f"{value:.2f}".rstrip("0").rstrip(".")
 
+    def stock_unit_label(product: dict[str, str]) -> str:
+        return (product.get("unidad") or "ud").strip() or "ud"
+
+    def sale_unit_label(product: dict[str, str]) -> str:
+        return product_sale_unit(product)
+
+    def fraction_info_label(product: dict[str, str]) -> str:
+        if not product_is_fractionable(product):
+            return ""
+        fractions = format_compact_number(product_fraction_count(product))
+        return f"{fractions} {sale_unit_label(product)} por {stock_unit_label(product)}"
+
+    def stock_display_parts(product: dict[str, str], stock_value: float | None) -> tuple[str, str]:
+        if stock_value is None:
+            return ("♾️", "")
+
+        stock_text = f"{format_compact_number(stock_value)} {stock_unit_label(product)}"
+        if not product_is_fractionable(product):
+            return (stock_text, "")
+
+        sale_qty = stock_quantity_to_sale_quantity(product, stock_value)
+        sale_text = f"{format_compact_number(sale_qty)} {sale_unit_label(product)}"
+        return (sale_text, stock_text)
+
     def extract_note_value(note: str, prefix: str) -> str:
         for part in (note or "").split("|"):
             text = part.strip()
@@ -220,99 +269,47 @@ def create_app() -> Flask:
         response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
-    def editable_data_sources() -> list[dict[str, object]]:
+    def config_section_key(section: str = "") -> str:
+        aliases = {
+            "": "caja",
+            "saldo-caja": "caja",
+            "caja": "caja",
+            "usuarios-admin": "usuarios",
+            "perfil-acceso": "usuarios",
+            "usuarios": "usuarios",
+            "logs-uso": "logs",
+            "logs": "logs",
+        }
+        return aliases.get((section or "").strip().lower(), "caja")
+
+    def redirect_to_config(section: str = "", **values):
+        endpoint_by_section = {
+            "caja": "configuracion_caja",
+            "usuarios": "configuracion_usuarios",
+            "logs": "configuracion_logs",
+        }
+        key = config_section_key(section)
+        return redirect(url_for(endpoint_by_section[key], **values))
+
+    def config_shortcuts(active_section: str) -> list[dict[str, str | bool]]:
+        items = [
+            ("caja", "Configurar saldo de caja", url_for("configuracion_caja")),
+            ("usuarios", "Configurar usuarios", url_for("configuracion_usuarios")),
+            ("logs", "Revisar logs de uso", url_for("configuracion_logs")),
+        ]
         return [
             {
-                "key": "usuarios",
-                "label": "Usuarios",
-                "description": "Usuarios de acceso, roles y hashes de contrasena.",
-                "path": config.CSV_USUARIOS,
-                "headers": USERS_HEADERS,
-            },
-            {
-                "key": "productos",
-                "label": "Productos",
-                "description": "Catalogo base del inventario.",
-                "path": config.CSV_PRODUCTOS,
-                "headers": PRODUCT_HEADERS,
-            },
-            {
-                "key": "movimientos",
-                "label": "Movimientos inventario",
-                "description": "Entradas, salidas y ajustes de stock.",
-                "path": config.CSV_MOVS,
-                "headers": MOV_HEADERS,
-            },
-            {
-                "key": "facturas",
-                "label": "Facturas",
-                "description": "Cabeceras de facturas emitidas.",
-                "path": config.CSV_FACTURAS,
-                "headers": INVOICE_HEADERS,
-            },
-            {
-                "key": "facturas_lineas",
-                "label": "Lineas de factura",
-                "description": "Detalle de lineas incluidas en cada factura.",
-                "path": config.CSV_FACTURA_LINEAS,
-                "headers": INVOICE_LINE_HEADERS,
-            },
-            {
-                "key": "gastos_libres",
-                "label": "Gastos libres",
-                "description": "Gastos manuales que descuentan caja.",
-                "path": config.CSV_GASTOS_LIBRES,
-                "headers": FREE_EXPENSE_HEADERS,
-            },
-            {
-                "key": "logs",
-                "label": "Logs de uso",
-                "description": "Registro de actividad y respuestas HTTP.",
-                "path": config.CSV_LOGS,
-                "headers": AUDIT_HEADERS,
-            },
-            {
-                "key": "caja",
-                "label": "Saldo de caja",
-                "description": "Estado persistido de la caja general.",
-                "path": config.CSV_CAJA,
-                "headers": CASHBOX_HEADERS,
-            },
+                "key": key,
+                "label": label,
+                "href": href,
+                "active": key == active_section,
+            }
+            for key, label, href in items
         ]
-
-    def get_editable_data_source(file_key: str) -> dict[str, object] | None:
-        key = (file_key or "").strip().lower()
-        for source in editable_data_sources():
-            if source["key"] == key:
-                return source
-        return None
-
-    def data_editor_context(file_key: str = "") -> dict[str, object]:
-        sources = editable_data_sources()
-        source = get_editable_data_source(file_key) or sources[0]
-        headers = list(source["headers"])
-        rows = read_all(source["path"])
-        if not rows:
-            rows = [{header: "" for header in headers}]
-
-        return {
-            "data_sources": sources,
-            "selected_data_key": source["key"],
-            "selected_data_source": source,
-            "data_headers": headers,
-            "data_rows": rows,
-            "data_row_count": len(rows),
-        }
-
-    def redirect_to_config(anchor: str = ""):
-        target = url_for("configuracion")
-        if anchor:
-            target = f"{target}#{anchor}"
-        return redirect(target)
 
     def redirect_to_user_area():
         if user_is_admin():
-            return redirect_to_config("perfil-acceso")
+            return redirect_to_config("usuarios")
         return redirect(url_for("gestion_usuarios"))
 
     def admin_logs_context() -> dict[str, object]:
@@ -365,6 +362,17 @@ def create_app() -> Flask:
             },
         }
 
+    def admin_user_context() -> dict[str, object]:
+        users = list_users(config.CSV_USUARIOS)
+        return {
+            "users": users,
+            "user_stats": {
+                "total": len(users),
+                "admins": sum(1 for row in users if (row.get("rol") or "").strip().lower() == "admin"),
+                "normal": sum(1 for row in users if (row.get("rol") or "normal").strip().lower() != "admin"),
+            },
+        }
+
     def inventory_snapshot() -> dict[str, int]:
         prods = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
@@ -389,11 +397,895 @@ def create_app() -> Flask:
             "groups": len(groups),
         }
 
+    def format_money(value: float) -> str:
+        return f"{value:.2f} €"
+
+    def format_signed_money(value: float) -> str:
+        sign = "+" if value > 0 else ""
+        return f"{sign}{value:.2f} €"
+
+    def format_percent(value: float) -> str:
+        return f"{value:.1f}%".replace(".0%", "%")
+
+    def format_analysis_date(value: date) -> str:
+        month_names = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+        return f"{value.day} {month_names[value.month - 1]}"
+
+    def parse_query_date(raw: str, fallback: date) -> date:
+        text = (raw or "").strip()
+        if not text:
+            return fallback
+        try:
+            return date.fromisoformat(text)
+        except ValueError:
+            return fallback
+
+    def analysis_detail_range_defaults() -> tuple[date, date]:
+        end_date = date.today()
+        start_date = date(end_date.year, 1, 1)
+        return start_date, end_date
+
+    def analysis_detail_type_options() -> list[dict[str, str]]:
+        return [
+            {"value": "factura", "label": "Factura"},
+            {"value": "compra", "label": "Compra"},
+            {"value": "gasto", "label": "Gasto"},
+            {"value": "ajuste", "label": "Ajuste"},
+        ]
+
+    def normalize_analysis_detail_types(raw_values: list[str] | tuple[str, ...]) -> list[str]:
+        allowed_order = [item["value"] for item in analysis_detail_type_options()]
+        allowed = set(allowed_order)
+        seen: set[str] = set()
+        normalized: list[str] = []
+
+        for raw in raw_values:
+            for part in str(raw or "").split(","):
+                value = part.strip().lower()
+                if value and value in allowed and value not in seen:
+                    normalized.append(value)
+                    seen.add(value)
+
+        normalized.sort(key=lambda value: allowed_order.index(value))
+        return normalized
+
+    def analysis_detail_query_params(
+        start_date: date,
+        end_date: date,
+        selected_types: list[str],
+        view: str = "detalle",
+    ) -> dict[str, object]:
+        params: dict[str, object] = {
+            "view": view,
+            "from": start_date.isoformat(),
+            "to": end_date.isoformat(),
+        }
+        if selected_types:
+            params["tipo"] = selected_types
+        return params
+
+    def analysis_available_years(cash_movements_csv) -> list[int]:
+        years = {date.today().year}
+        for row in read_all(cash_movements_csv):
+            parsed = parse_iso_datetime(row.get("fecha", ""))
+            if parsed:
+                years.add(parsed.year)
+        return sorted(years, reverse=True)
+
+    def parse_analysis_year(raw: str, fallback: int, allowed_years: list[int]) -> int:
+        text = (raw or "").strip()
+        if not text:
+            return fallback
+        try:
+            value = int(text)
+        except ValueError:
+            return fallback
+        if value in allowed_years:
+            return value
+        return fallback
+
+    def analysis_annual_range(selected_year: int) -> tuple[date, date]:
+        start_date = date(selected_year, 1, 1)
+        return start_date, date(selected_year, 12, 31)
+
+    def build_analysis_annual_summary(selected_year: int) -> dict[str, object]:
+        annual_start_date, annual_end_date = analysis_annual_range(selected_year)
+        annual_summary_raw = cash_annual_summary(
+            config.CSV_CAJA_MOVIMIENTOS,
+            start_date=annual_start_date,
+            end_date=annual_end_date,
+        )
+        annual_summary_rows = [
+            {
+                "label": analysis_bucket_label(date(int(row["year"]), int(row["month"]), 1), "month"),
+                "income_total": float(row["income_total"]),
+                "expense_total": float(row["expense_total"]),
+                "saldo": float(row["saldo"]),
+            }
+            for row in annual_summary_raw["rows"]
+        ]
+        return {
+            "rows": annual_summary_rows,
+            "opening_balance": float(annual_summary_raw["opening_balance"]),
+            "closing_balance": float(annual_summary_raw["closing_balance"]),
+            "net_balance": float(annual_summary_raw["net_balance"]),
+        }
+
+    def build_analysis_annual_markdown(selected_year: int, annual_summary: dict[str, object]) -> str:
+        lines = [
+            f"# Resumen anual de caja {selected_year}",
+            "",
+            "## Resumen mensual",
+            "",
+            "| Mes | Total ingresos | Total gastos | Saldo |",
+            "| --- | -------------:| -----------:| -----:|",
+        ]
+
+        for row in annual_summary["rows"]:
+            lines.append(
+                f"| {row['label']} | "
+                f"{float(row['income_total']):+.2f} € | "
+                f"{-float(row['expense_total']):.2f} € | "
+                f"{float(row['saldo']):+.2f} € |"
+            )
+
+        lines.extend([
+            "",
+            "## KPIs",
+            "",
+            f"- Saldo inicial: {float(annual_summary['opening_balance']):.2f} €",
+            f"- Saldo final: {float(annual_summary['closing_balance']):.2f} €",
+            f"- Balance saldo de caja: {float(annual_summary['net_balance']):+.2f} €",
+        ])
+        return "\n".join(lines)
+
+    def analysis_range_defaults() -> tuple[date, date]:
+        end_date = date.today()
+        start_date = end_date - timedelta(days=29)
+        return start_date, end_date
+
+    def analysis_bucket_kind(start_date: date, end_date: date) -> str:
+        days = max((end_date - start_date).days + 1, 1)
+        if days <= 31:
+            return "day"
+        if days <= 150:
+            return "week"
+        return "month"
+
+    def analysis_bucket_key(value_date: date, kind: str) -> date:
+        if kind == "month":
+            return date(value_date.year, value_date.month, 1)
+        if kind == "week":
+            return value_date - timedelta(days=value_date.weekday())
+        return value_date
+
+    def analysis_bucket_label(value_date: date, kind: str) -> str:
+        if kind == "month":
+            month_names = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+            return f"{month_names[value_date.month - 1]} {value_date.year}"
+        if kind == "week":
+            end_week = value_date + timedelta(days=6)
+            return f"{format_analysis_date(value_date)} - {format_analysis_date(end_week)}"
+        return format_analysis_date(value_date)
+
+    def analysis_in_range(raw: str, start_date: date, end_date: date) -> bool:
+        parsed = parse_iso_datetime(raw)
+        if not parsed:
+            return False
+        value = parsed.date()
+        return start_date <= value <= end_date
+
+    def analysis_percent(value: float, max_value: float) -> float:
+        if max_value <= 0:
+            return 0.0
+        return round((value / max_value) * 100, 1)
+
+    def analysis_delta_note(current: float, previous: float, *, inverted: bool = False) -> str:
+        if abs(previous) < 1e-9:
+            if abs(current) < 1e-9:
+                return "Sin cambios frente al periodo anterior"
+            return "Sin datos comparables en el periodo anterior"
+
+        delta = ((current - previous) / previous) * 100
+        good = delta <= 0 if inverted else delta >= 0
+        prefix = "Mejora" if good else "Empeora"
+        sign = "+" if delta >= 0 else ""
+        return f"{prefix} {sign}{format_percent(delta)} vs periodo anterior"
+
+    def analysis_stat_card(label: str, value: str, note: str, tone: str = "neutral") -> dict[str, str]:
+        return {
+            "label": label,
+            "value": value,
+            "note": note,
+            "tone": tone,
+        }
+
+    def analysis_ranking_rows(
+        items: list[dict[str, object]],
+        *,
+        value_key: str,
+        value_formatter,
+        meta_builder,
+        limit: int = 8,
+    ) -> list[dict[str, object]]:
+        if not items:
+            return []
+
+        top_items = items[:limit]
+        max_value = max(float(item.get(value_key) or 0.0) for item in top_items) or 1.0
+        rows: list[dict[str, object]] = []
+        for item in top_items:
+            raw_value = float(item.get(value_key) or 0.0)
+            rows.append({
+                "label": item.get("label", "-"),
+                "meta": meta_builder(item),
+                "value": value_formatter(raw_value),
+                "pct": analysis_percent(raw_value, max_value),
+            })
+        return rows
+
+    def analysis_stock_alerts() -> list[dict[str, object]]:
+        products = get_products(config.CSV_PRODUCTOS)
+        stock_map = calc_stock_by_product(config.CSV_MOVS)
+        alerts: list[dict[str, object]] = []
+        for product in products:
+            if product.get("stock_infinito", "0") == "1":
+                continue
+            product_id = product.get("producto_id", "")
+            current_stock = stock_map.get(product_id, 0.0)
+            min_stock = safe_float(product.get("stock_minimo"))
+            gap = min_stock - current_stock
+            if gap <= 0:
+                continue
+            alerts.append({
+                "label": f"{product.get('grupo_emoji', '📦')} {product.get('nombre', '')}",
+                "meta": f"Actual {format_compact_number(current_stock)} · Minimo {format_compact_number(min_stock)}",
+                "value": f"Faltan {format_compact_number(gap)}",
+                "pct": 100.0 if min_stock <= 0 else min(100.0, round((gap / min_stock) * 100, 1)),
+                "href": url_for("inventario", producto_id=product_id, low="1"),
+            })
+        alerts.sort(key=lambda row: row["pct"], reverse=True)
+        return alerts[:8]
+
+    def analysis_context(start_date: date, end_date: date, current_tab: str) -> dict[str, object]:
+        period_days = max((end_date - start_date).days + 1, 1)
+        previous_end = start_date - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=period_days - 1)
+
+        products = get_products(config.CSV_PRODUCTOS)
+        product_map = {product.get("producto_id", ""): product for product in products}
+
+        invoices_all = list_invoices(config.CSV_FACTURAS, limit=0)
+        invoice_lines_all = list_invoice_lines(config.CSV_FACTURA_LINEAS)
+        purchase_tickets_all, purchase_lines_map_all = list_purchase_history(
+            config.CSV_MOVS,
+            product_names={pid: product.get("nombre", "") for pid, product in product_map.items()},
+            limit=0,
+        )
+        expenses_all = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=0)
+
+        invoices = [row for row in invoices_all if analysis_in_range(row.get("fecha", ""), start_date, end_date)]
+        purchases = [row for row in purchase_tickets_all if analysis_in_range(row.get("fecha", ""), start_date, end_date)]
+        expenses = [row for row in expenses_all if analysis_in_range(row.get("fecha", ""), start_date, end_date)]
+
+        invoice_ids = {(row.get("factura_id") or "").strip() for row in invoices if (row.get("factura_id") or "").strip()}
+        filtered_invoice_lines = [
+            line for line in invoice_lines_all
+            if (line.get("factura_id") or "").strip() in invoice_ids
+        ]
+
+        invoice_amount = sum(safe_float(row.get("total_importe")) for row in invoices)
+        purchase_amount = sum(safe_float(row.get("total_importe")) for row in purchases)
+        expense_amount = sum(safe_float(row.get("importe")) for row in expenses)
+        net_amount = invoice_amount - purchase_amount - expense_amount
+        gross_margin_amount = invoice_amount - purchase_amount
+
+        invoice_count = len(invoices)
+        purchase_count = len(purchases)
+        expense_count = len(expenses)
+        total_movements = invoice_count + purchase_count + expense_count
+        client_count = len({(row.get("cliente") or "").strip() for row in invoices if (row.get("cliente") or "").strip()})
+        provider_count = len({(row.get("proveedor") or "").strip() for row in purchases if (row.get("proveedor") or "").strip()})
+
+        def analysis_ratio(part: float, whole: float) -> float:
+            if abs(whole) < 1e-9:
+                return 0.0
+            return (part / whole) * 100
+
+        sales_by_product: dict[str, dict[str, object]] = {}
+        sales_by_group: dict[str, dict[str, object]] = {}
+        for line in filtered_invoice_lines:
+            product_id = (line.get("producto_id") or "").strip()
+            product = product_map.get(product_id, {})
+            label = f"{product.get('grupo_emoji', '📦')} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
+            qty = safe_float(line.get("cantidad"))
+            amount = safe_float(line.get("importe_linea"))
+            group_name = (product.get("grupo") or "Otros").strip() or "Otros"
+            group_emoji = (product.get("grupo_emoji") or "📦").strip() or "📦"
+
+            product_row = sales_by_product.setdefault(product_id or label, {
+                "label": label,
+                "qty": 0.0,
+                "amount": 0.0,
+                "lines": 0,
+            })
+            product_row["qty"] += qty
+            product_row["amount"] += amount
+            product_row["lines"] += 1
+
+            group_row = sales_by_group.setdefault(group_name, {
+                "label": f"{group_emoji} {group_name}",
+                "sales_amount": 0.0,
+                "sales_qty": 0.0,
+                "purchase_amount": 0.0,
+                "purchase_qty": 0.0,
+            })
+            group_row["sales_amount"] += amount
+            group_row["sales_qty"] += qty
+
+        spend_by_product: dict[str, dict[str, object]] = {}
+        spend_by_group: dict[str, dict[str, object]] = {}
+        for ticket in purchases:
+            ref_id = (ticket.get("ref_id") or "").strip()
+            for line in purchase_lines_map_all.get(ref_id, []):
+                product_id = (line.get("producto_id") or "").strip()
+                product = product_map.get(product_id, {})
+                label = f"{product.get('grupo_emoji', '📦')} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
+                qty = safe_float(line.get("cantidad"))
+                amount = safe_float(line.get("importe_linea"))
+                group_name = (product.get("grupo") or "Otros").strip() or "Otros"
+                group_emoji = (product.get("grupo_emoji") or "📦").strip() or "📦"
+
+                product_row = spend_by_product.setdefault(product_id or label, {
+                    "label": label,
+                    "qty": 0.0,
+                    "amount": 0.0,
+                    "lines": 0,
+                })
+                product_row["qty"] += qty
+                product_row["amount"] += amount
+                product_row["lines"] += 1
+
+                group_row = spend_by_group.setdefault(group_name, {
+                    "label": f"{group_emoji} {group_name}",
+                    "sales_amount": 0.0,
+                    "sales_qty": 0.0,
+                    "purchase_amount": 0.0,
+                    "purchase_qty": 0.0,
+                })
+                group_row["purchase_amount"] += amount
+                group_row["purchase_qty"] += qty
+
+        expense_by_category: dict[str, dict[str, object]] = {}
+        for expense in expenses:
+            category = (expense.get("categoria") or "Sin categoria").strip() or "Sin categoria"
+            row = expense_by_category.setdefault(category, {
+                "label": category,
+                "amount": 0.0,
+                "count": 0,
+            })
+            row["amount"] += safe_float(expense.get("importe"))
+            row["count"] += 1
+
+        user_activity: dict[str, dict[str, object]] = {}
+        for invoice in invoices:
+            user = (invoice.get("usuario") or "").strip() or "-"
+            row = user_activity.setdefault(user, {
+                "label": user,
+                "invoice_amount": 0.0,
+                "purchase_amount": 0.0,
+                "expense_amount": 0.0,
+                "invoice_count": 0,
+                "purchase_count": 0,
+                "expense_count": 0,
+            })
+            row["invoice_amount"] += safe_float(invoice.get("total_importe"))
+            row["invoice_count"] += 1
+        for purchase in purchases:
+            user = (purchase.get("usuario") or "").strip() or "-"
+            row = user_activity.setdefault(user, {
+                "label": user,
+                "invoice_amount": 0.0,
+                "purchase_amount": 0.0,
+                "expense_amount": 0.0,
+                "invoice_count": 0,
+                "purchase_count": 0,
+                "expense_count": 0,
+            })
+            row["purchase_amount"] += safe_float(purchase.get("total_importe"))
+            row["purchase_count"] += 1
+        for expense in expenses:
+            user = (expense.get("usuario") or "").strip() or "-"
+            row = user_activity.setdefault(user, {
+                "label": user,
+                "invoice_amount": 0.0,
+                "purchase_amount": 0.0,
+                "expense_amount": 0.0,
+                "invoice_count": 0,
+                "purchase_count": 0,
+                "expense_count": 0,
+            })
+            row["expense_amount"] += safe_float(expense.get("importe"))
+            row["expense_count"] += 1
+
+        client_totals: dict[str, dict[str, object]] = {}
+        for invoice in invoices:
+            client = (invoice.get("cliente") or "").strip()
+            if not client:
+                continue
+            row = client_totals.setdefault(client, {"label": client, "amount": 0.0, "count": 0})
+            row["amount"] += safe_float(invoice.get("total_importe"))
+            row["count"] += 1
+
+        provider_totals: dict[str, dict[str, object]] = {}
+        for purchase in purchases:
+            provider = (purchase.get("proveedor") or "").strip()
+            if not provider:
+                continue
+            row = provider_totals.setdefault(provider, {"label": provider, "amount": 0.0, "count": 0})
+            row["amount"] += safe_float(purchase.get("total_importe"))
+            row["count"] += 1
+
+        bucket_kind = analysis_bucket_kind(start_date, end_date)
+        flow_map: dict[date, dict[str, float | str]] = {}
+
+        def ensure_bucket(raw: str) -> dict[str, float | str]:
+            parsed = parse_iso_datetime(raw)
+            bucket_date = analysis_bucket_key((parsed.date() if parsed else start_date), bucket_kind)
+            if bucket_date not in flow_map:
+                flow_map[bucket_date] = {
+                    "label": analysis_bucket_label(bucket_date, bucket_kind),
+                    "incoming": 0.0,
+                    "outgoing": 0.0,
+                    "net": 0.0,
+                }
+            return flow_map[bucket_date]
+
+        for invoice in invoices:
+            bucket = ensure_bucket(invoice.get("fecha", ""))
+            amount = safe_float(invoice.get("total_importe"))
+            bucket["incoming"] += amount
+            bucket["net"] += amount
+        for purchase in purchases:
+            bucket = ensure_bucket(purchase.get("fecha", ""))
+            amount = safe_float(purchase.get("total_importe"))
+            bucket["outgoing"] += amount
+            bucket["net"] -= amount
+        for expense in expenses:
+            bucket = ensure_bucket(expense.get("fecha", ""))
+            amount = safe_float(expense.get("importe"))
+            bucket["outgoing"] += amount
+            bucket["net"] -= amount
+
+        flow_rows = [
+            {
+                "label": data["label"],
+                "incoming": float(data["incoming"]),
+                "outgoing": float(data["outgoing"]),
+                "net": float(data["net"]),
+            }
+            for _, data in sorted(flow_map.items())
+        ]
+        max_flow_value = max(
+            [row["incoming"] for row in flow_rows] + [row["outgoing"] for row in flow_rows] + [1.0]
+        )
+        for row in flow_rows:
+            row["incoming_width"] = analysis_percent(row["incoming"], max_flow_value)
+            row["outgoing_width"] = analysis_percent(row["outgoing"], max_flow_value)
+            row["net_label"] = format_signed_money(row["net"])
+            row["incoming_label"] = format_money(row["incoming"])
+            row["outgoing_label"] = format_money(row["outgoing"])
+            row["net_class"] = "positive" if row["net"] > 0 else "negative" if row["net"] < 0 else "neutral"
+
+        flow_chart_rows = flow_rows[-8:]
+        flow_chart_points = ""
+        flow_chart_baseline = 50.0
+        if flow_chart_rows:
+            chart_values = [row["net"] for row in flow_chart_rows]
+            chart_min = min(chart_values + [0.0])
+            chart_max = max(chart_values + [0.0])
+            chart_span = (chart_max - chart_min) or 1.0
+            point_values = []
+            for index, row in enumerate(flow_chart_rows):
+                x = 50.0 if len(flow_chart_rows) == 1 else (index / (len(flow_chart_rows) - 1)) * 100
+                y = 100 - (((row["net"] - chart_min) / chart_span) * 100)
+                point_values.append(f"{x:.2f},{y:.2f}")
+            flow_chart_points = " ".join(point_values)
+            flow_chart_baseline = 100 - (((0.0 - chart_min) / chart_span) * 100)
+
+        outflow_items = [
+            ("Compras", purchase_amount, "#5c8fda"),
+            ("Gastos", expense_amount, "#dd7f66"),
+        ]
+        outflow_total = sum(value for _, value, _ in outflow_items)
+        outflow_segments = []
+        outflow_legend = []
+        outflow_cursor = 0.0
+        for label, value, color in outflow_items:
+            pct = (value / outflow_total * 100) if outflow_total > 0 else 0.0
+            outflow_segments.append(f"{color} {outflow_cursor:.2f}% {outflow_cursor + pct:.2f}%")
+            outflow_legend.append({
+                "label": label,
+                "value": format_money(value),
+                "pct": format_percent(pct),
+                "color": color,
+            })
+            outflow_cursor += pct
+        outflow_style = "background: conic-gradient(" + (", ".join(outflow_segments) if outflow_segments else "#dbe7e1 0 100%") + ");"
+
+        sales_items = sorted(sales_by_product.values(), key=lambda row: (row["amount"], row["qty"]), reverse=True)
+        spend_items = sorted(spend_by_product.values(), key=lambda row: (row["amount"], row["qty"]), reverse=True)
+        sold_units = sum(float(row.get("qty") or 0.0) for row in sales_items)
+        purchased_units = sum(float(row.get("qty") or 0.0) for row in spend_items)
+        category_items_map = dict(sales_by_group)
+        for key, value in spend_by_group.items():
+            if key not in category_items_map:
+                category_items_map[key] = value
+        category_items = sorted(
+            category_items_map.values(),
+            key=lambda row: (row["sales_amount"] + row["purchase_amount"], row["sales_qty"] + row["purchase_qty"]),
+            reverse=True,
+        )
+
+        max_category_sales = max([float(row.get("sales_amount") or 0.0) for row in category_items] + [1.0])
+        max_category_spend = max([float(row.get("purchase_amount") or 0.0) for row in category_items] + [1.0])
+        category_rows = []
+        for item in category_items[:8]:
+            sales_amount = float(item.get("sales_amount") or 0.0)
+            purchase_amount = float(item.get("purchase_amount") or 0.0)
+            net_amount_by_group = sales_amount - purchase_amount
+            category_rows.append({
+                "label": item.get("label", "-"),
+                "sales_value": format_money(sales_amount),
+                "purchase_value": format_money(purchase_amount),
+                "sales_width": analysis_percent(sales_amount, max_category_sales),
+                "purchase_width": analysis_percent(purchase_amount, max_category_spend),
+                "net_value": format_signed_money(net_amount_by_group),
+                "net_class": "profit" if net_amount_by_group >= 0 else "loss",
+            })
+
+        product_margin_items = []
+        product_margin_map = dict(sales_by_product)
+        for key, value in spend_by_product.items():
+            if key not in product_margin_map:
+                product_margin_map[key] = value
+        for key, item in product_margin_map.items():
+            sale = sales_by_product.get(key, {})
+            spend = spend_by_product.get(key, {})
+            sales_amount = float(sale.get("amount") or 0.0)
+            purchase_cost = float(spend.get("amount") or 0.0)
+            margin_value = sales_amount - purchase_cost
+            product_margin_items.append({
+                "label": sale.get("label") or spend.get("label") or item.get("label") or "-",
+                "sales_amount": sales_amount,
+                "purchase_amount": purchase_cost,
+                "margin": margin_value,
+            })
+        product_margin_items = sorted(
+            product_margin_items,
+            key=lambda row: (row["margin"], row["sales_amount"]),
+            reverse=True,
+        )
+        max_margin_value = max([abs(float(row["margin"])) for row in product_margin_items[:8]] + [1.0])
+        product_margin_rows = [
+            {
+                "label": row["label"],
+                "value": format_signed_money(float(row["margin"])),
+                "meta": (
+                    f"Ventas {format_money(float(row['sales_amount']))} · "
+                    f"Compras {format_money(float(row['purchase_amount']))}"
+                ),
+                "pct": analysis_percent(abs(float(row["margin"])), max_margin_value),
+                "tone": "profit" if float(row["margin"]) >= 0 else "loss",
+            }
+            for row in product_margin_items[:8]
+        ]
+
+        top_sale_item = sales_items[0] if sales_items else None
+        current_low_stock = analysis_stock_alerts()
+        average_ticket = invoice_amount / invoice_count if invoice_count else 0.0
+        top_margin_item = product_margin_items[0] if product_margin_items else None
+        top_client_item = max(client_totals.values(), key=lambda row: row["amount"], default=None)
+        top_provider_item = max(provider_totals.values(), key=lambda row: row["amount"], default=None)
+
+        tabs = [
+            {
+                "key": "resumen",
+                "label": "Resumen",
+                "href": url_for("analisis", tab="resumen", **{"from": start_date.isoformat(), "to": end_date.isoformat()}),
+                "active": current_tab == "resumen",
+            },
+            {
+                "key": "productos",
+                "label": "Productos",
+                "href": url_for("analisis", tab="productos", **{"from": start_date.isoformat(), "to": end_date.isoformat()}),
+                "active": current_tab == "productos",
+            },
+            {
+                "key": "operativa",
+                "label": "Operativa",
+                "href": url_for("analisis", tab="operativa", **{"from": start_date.isoformat(), "to": end_date.isoformat()}),
+                "active": current_tab == "operativa",
+            },
+        ]
+
+        preset_specs = [
+            ("30d", "30 dias", date.today() - timedelta(days=29), date.today()),
+            ("90d", "90 dias", date.today() - timedelta(days=89), date.today()),
+            ("mes", "Este mes", date.today().replace(day=1), date.today()),
+            ("ano", "Este ano", date(date.today().year, 1, 1), date.today()),
+        ]
+        presets = [
+            {
+                "label": label,
+                "href": url_for("analisis", tab=current_tab, **{"from": start.isoformat(), "to": end.isoformat()}),
+                "active": start == start_date and end == end_date,
+            }
+            for _, label, start, end in preset_specs
+        ]
+
+        range_label = f"{format_analysis_date(start_date)} - {format_analysis_date(end_date)}"
+        previous_label = f"{format_analysis_date(previous_start)} - {format_analysis_date(previous_end)}"
+
+        overview_stats = [
+            analysis_stat_card(
+                "Ingresos facturados",
+                format_money(invoice_amount),
+                f"{invoice_count} facturas · ticket medio {format_money(average_ticket)}",
+                "positive",
+            ),
+            analysis_stat_card(
+                "Compras registradas",
+                format_money(purchase_amount),
+                f"{format_percent(analysis_ratio(purchase_amount, invoice_amount))} de los ingresos del periodo",
+                "negative",
+            ),
+            analysis_stat_card(
+                "Gastos libres",
+                format_money(expense_amount),
+                f"{format_percent(analysis_ratio(expense_amount, invoice_amount))} de los ingresos del periodo",
+                "negative",
+            ),
+            analysis_stat_card(
+                "Balance neto",
+                format_signed_money(net_amount),
+                f"Margen neto {format_percent(analysis_ratio(net_amount, invoice_amount))}",
+                "positive" if net_amount >= 0 else "negative",
+            ),
+        ]
+
+        product_stats = [
+            analysis_stat_card(
+                "Productos vendidos",
+                str(len(sales_items)),
+                f"{sold_units:.0f} uds facturadas",
+            ),
+            analysis_stat_card(
+                "Inversion en compras",
+                format_money(purchase_amount),
+                f"{len(spend_items)} productos abastecidos",
+                "negative",
+            ),
+            analysis_stat_card(
+                "Producto top ventas",
+                top_sale_item.get("label", "-") if top_sale_item else "-",
+                (
+                    f"{format_money(float(top_sale_item.get('amount') or 0.0))} · "
+                    f"{format_compact_number(float(top_sale_item.get('qty') or 0.0))} uds"
+                ) if top_sale_item else "Sin ventas",
+                "positive",
+            ),
+            analysis_stat_card(
+                "Mejor margen estimado",
+                top_margin_item.get("label", "-") if top_margin_item else "-",
+                format_signed_money(float(top_margin_item.get("margin") or 0.0)) if top_margin_item else "Sin datos cruzados",
+                "positive" if top_margin_item and float(top_margin_item.get("margin") or 0.0) >= 0 else "negative",
+            ),
+        ]
+
+        user_rows = sorted(
+            [
+                {
+                    "label": row["label"],
+                    "meta": (
+                        f"{row['invoice_count']} facturas · "
+                        f"{row['purchase_count']} compras · "
+                        f"{row['expense_count']} gastos"
+                    ),
+                    "net_amount": float(row["invoice_amount"]) - float(row["purchase_amount"]) - float(row["expense_amount"]),
+                    "raw_value": abs(float(row["invoice_amount"])) + abs(float(row["purchase_amount"])) + abs(float(row["expense_amount"])),
+                }
+                for row in user_activity.values()
+            ],
+            key=lambda item: item["raw_value"],
+            reverse=True,
+        )
+        max_user_value = max([item["raw_value"] for item in user_rows] + [1.0])
+        for item in user_rows:
+            item["value"] = format_signed_money(item["net_amount"])
+            item["pct"] = analysis_percent(item["raw_value"], max_user_value)
+            item["tone"] = "profit" if item["net_amount"] >= 0 else "loss"
+
+        client_rows = analysis_ranking_rows(
+            sorted(client_totals.values(), key=lambda row: (row["amount"], row["count"]), reverse=True),
+            value_key="amount",
+            value_formatter=format_money,
+            meta_builder=lambda item: f"{item['count']} facturas",
+            limit=6,
+        )
+        provider_rows = analysis_ranking_rows(
+            sorted(provider_totals.values(), key=lambda row: (row["amount"], row["count"]), reverse=True),
+            value_key="amount",
+            value_formatter=format_money,
+            meta_builder=lambda item: f"{item['count']} compras",
+            limit=6,
+        )
+        expense_rows = analysis_ranking_rows(
+            sorted(expense_by_category.values(), key=lambda row: (row["amount"], row["count"]), reverse=True),
+            value_key="amount",
+            value_formatter=format_money,
+            meta_builder=lambda item: f"{item['count']} movimientos",
+            limit=6,
+        )
+        top_user_item = user_rows[0] if user_rows else None
+        health_label = "Balance positivo" if net_amount >= 0 else "Balance tensionado"
+        cash_direction_label = "Caja en crecimiento" if net_amount >= 0 else "Caja en retroceso"
+
+        focus_cards_by_tab = {
+            "resumen": [
+                {
+                    "label": "Margen bruto",
+                    "value": format_signed_money(gross_margin_amount),
+                    "note": "Facturacion menos compras",
+                    "tone": "positive" if gross_margin_amount >= 0 else "negative",
+                },
+                {
+                    "label": "Peso de compras",
+                    "value": format_percent(analysis_ratio(purchase_amount, invoice_amount)),
+                    "note": "Sobre ingresos facturados",
+                    "tone": "negative",
+                },
+                {
+                    "label": "Peso de gastos libres",
+                    "value": format_percent(analysis_ratio(expense_amount, invoice_amount)),
+                    "note": "Salida no ligada a producto",
+                    "tone": "negative",
+                },
+            ],
+            "productos": [
+                {
+                    "label": "Margen estimado",
+                    "value": format_signed_money(gross_margin_amount),
+                    "note": "Ventas del periodo frente a compras registradas",
+                    "tone": "positive" if gross_margin_amount >= 0 else "negative",
+                },
+                {
+                    "label": "Rotacion",
+                    "value": (
+                        f"{format_compact_number(sold_units / purchased_units)}x"
+                        if purchased_units > 0 else "Sin base"
+                    ),
+                    "note": f"{sold_units:.0f} uds vendidas · {purchased_units:.0f} compradas",
+                    "tone": "positive",
+                },
+                {
+                    "label": "Stock bajo",
+                    "value": str(len(current_low_stock)),
+                    "note": "Productos por debajo del minimo",
+                    "tone": "negative" if current_low_stock else "positive",
+                },
+            ],
+            "operativa": [
+                {
+                    "label": "Usuario principal",
+                    "value": top_user_item.get("label", "-") if top_user_item else "-",
+                    "note": top_user_item.get("meta", "Sin actividad") if top_user_item else "Sin actividad",
+                    "tone": "positive",
+                },
+                {
+                    "label": "Cliente principal",
+                    "value": top_client_item.get("label", "-") if top_client_item else "-",
+                    "note": format_money(float(top_client_item.get("amount") or 0.0)) if top_client_item else "Sin clientes",
+                    "tone": "positive",
+                },
+                {
+                    "label": "Proveedor principal",
+                    "value": top_provider_item.get("label", "-") if top_provider_item else "-",
+                    "note": format_money(float(top_provider_item.get("amount") or 0.0)) if top_provider_item else "Sin proveedores",
+                    "tone": "negative",
+                },
+            ],
+        }
+
+        return {
+            "analysis_tabs": tabs,
+            "analysis_presets": presets,
+            "analysis_filters": {
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "tab": current_tab,
+            },
+            "analysis_header": {
+                "range_label": range_label,
+                "previous_label": previous_label,
+                "period_days": period_days,
+                "cash_balance": get_cashbox_state(config.CSV_CAJA).get("saldo_actual", "0.00"),
+                "headline": "Vision global de la caja, consumo y operativa",
+                "health_label": health_label,
+                "cash_direction_label": cash_direction_label,
+                "subline": (
+                    "Combina ingresos por facturas, compras, gastos libres, productos y actividad "
+                    "de administracion en un solo panel."
+                ),
+            },
+            "analysis_focus_cards": focus_cards_by_tab.get(current_tab, focus_cards_by_tab["resumen"]),
+            "overview_stats": overview_stats,
+            "product_stats": product_stats,
+            "operation_stats": [
+                analysis_stat_card(
+                    "Usuarios activos",
+                    str(len(user_rows)),
+                    (
+                        f"{format_compact_number(total_movements / len(user_rows))} movimientos por usuario"
+                        if user_rows else "Sin actividad registrada"
+                    ),
+                ),
+                analysis_stat_card(
+                    "Clientes activos",
+                    str(client_count),
+                    (
+                        f"Principal {top_client_item.get('label', '-')}"
+                        if top_client_item else f"{invoice_count} facturas emitidas"
+                    ),
+                    "positive",
+                ),
+                analysis_stat_card(
+                    "Proveedores activos",
+                    str(provider_count),
+                    (
+                        f"Principal {top_provider_item.get('label', '-')}"
+                        if top_provider_item else f"{purchase_count} compras registradas"
+                    ),
+                    "negative",
+                ),
+                analysis_stat_card("Ticket medio", format_money(average_ticket), "Solo facturas del periodo"),
+            ],
+            "flow_rows": flow_rows[-8:],
+            "flow_chart": {
+                "points": flow_chart_points,
+                "baseline": round(flow_chart_baseline, 2),
+            },
+            "flow_balance": {
+                "incoming": format_money(invoice_amount),
+                "outgoing": format_money(purchase_amount + expense_amount),
+                "net": format_signed_money(net_amount),
+            },
+            "outflow_chart": {
+                "style": outflow_style,
+                "legend": outflow_legend,
+            },
+            "sales_rows": analysis_ranking_rows(
+                sales_items,
+                value_key="amount",
+                value_formatter=format_money,
+                meta_builder=lambda item: f"{format_compact_number(float(item['qty']))} uds · {item['lines']} lineas",
+                limit=8,
+            ),
+            "product_margin_rows": product_margin_rows,
+            "category_rows": category_rows,
+            "user_rows": user_rows[:8],
+            "client_rows": client_rows,
+            "provider_rows": provider_rows,
+            "expense_rows": expense_rows,
+            "current_low_stock": current_low_stock,
+            "analysis_empty": not (invoices or purchases or expenses),
+        }
+
     @app.context_processor
     def inject_shell_context():
         nav_items = []
         if session.get("user"):
-            settings_href = url_for("configuracion") if getattr(g, "is_admin", False) else url_for("gestion_usuarios")
+            settings_href = url_for("configuracion_caja") if getattr(g, "is_admin", False) else url_for("gestion_usuarios")
             settings_label = "Configuracion" if getattr(g, "is_admin", False) else "Usuario"
             nav_items = [
                 {
@@ -435,8 +1327,10 @@ def create_app() -> Flask:
                         "crear_usuario",
                         "eliminar_usuario",
                         "configuracion",
+                        "configuracion_caja",
+                        "configuracion_usuarios",
+                        "configuracion_logs",
                         "actualizar_saldo_caja",
-                        "actualizar_datos_manualmente",
                         "supervision",
                     },
                 },
@@ -457,6 +1351,12 @@ def create_app() -> Flask:
             raise ValueError("La factura no tiene lineas para imprimir.")
 
         ticket_text = format_invoice_ticket(invoice, lines)
+        print_text_ticket(ticket_text, config.PRINT_JOBS_DIR)
+
+    def print_shopping_list_ticket(items: list[dict[str, str]]) -> None:
+        if not items:
+            raise ValueError("La lista de compra no tiene productos para imprimir.")
+        ticket_text = format_shopping_list_ticket(items)
         print_text_ticket(ticket_text, config.PRINT_JOBS_DIR)
 
     @app.after_request
@@ -503,7 +1403,7 @@ def create_app() -> Flask:
         if r:
             return r
         if user_is_admin():
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
         users = list_users(config.CSV_USUARIOS) if user_is_admin() else []
         user_stats = {
             "total": len(users),
@@ -560,19 +1460,19 @@ def create_app() -> Flask:
 
         if not username:
             flash("El nombre de usuario es obligatorio.")
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
         if len(password) < 4:
             flash("La contraseña debe tener al menos 4 caracteres.")
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         try:
             create_user(config.CSV_USUARIOS, username=username, password=password, rol=role)
         except ValueError as exc:
             flash(str(exc))
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         flash("Usuario creado ✅")
-        return redirect_to_config("usuarios-admin")
+        return redirect_to_config("usuarios")
 
     @app.post("/usuarios/eliminar")
     def eliminar_usuario():
@@ -583,51 +1483,78 @@ def create_app() -> Flask:
         username = (request.form.get("username") or "").strip()
         if not username:
             flash("Usuario no válido.")
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         me = (session.get("user") or "").strip().lower()
         if username.lower() == me:
             flash("No puedes desactivar tu propio usuario.")
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         users = list_users(config.CSV_USUARIOS)
         target = next((u for u in users if (u.get("username") or "").strip().lower() == username.lower()), None)
         if not target:
             flash("Usuario no encontrado.")
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         try:
             delete_user(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR, username=username)
         except ValueError as exc:
             flash(str(exc))
-            return redirect_to_config("usuarios-admin")
+            return redirect_to_config("usuarios")
 
         flash("Usuario eliminado 🗑️")
-        return redirect_to_config("usuarios-admin")
+        return redirect_to_config("usuarios")
 
     @app.get("/configuracion")
     def configuracion():
+        return redirect(url_for("configuracion_caja"))
+
+    @app.get("/configuracion/caja")
+    def configuracion_caja():
         r = require_admin()
         if r:
             return r
 
-        users = list_users(config.CSV_USUARIOS)
-        user_stats = {
-            "total": len(users),
-            "admins": sum(1 for row in users if (row.get("rol") or "").strip().lower() == "admin"),
-            "normal": sum(1 for row in users if (row.get("rol") or "normal").strip().lower() != "admin"),
-        }
-        selected_file = (request.args.get("file") or "").strip()
+        return render_template(
+            "configuracion.html",
+            title="Saldo de caja",
+            config_section="caja",
+            config_title="Configurar saldo de caja",
+            config_subtitle="Las facturas suman y las compras o gastos libres restan automaticamente.",
+            config_nav=config_shortcuts("caja"),
+            cash_state=get_cashbox_state(config.CSV_CAJA),
+        )
+
+    @app.get("/configuracion/usuarios")
+    def configuracion_usuarios():
+        r = require_admin()
+        if r:
+            return r
 
         return render_template(
             "configuracion.html",
-            title="Configuracion",
-            users=users,
-            user_stats=user_stats,
-            cash_state=get_cashbox_state(config.CSV_CAJA),
-            selected_file=selected_file,
+            title="Usuarios",
+            config_section="usuarios",
+            config_title="Configurar usuarios",
+            config_subtitle="Gestiona accesos, roles y tu propia contraseña de administrador.",
+            config_nav=config_shortcuts("usuarios"),
+            **admin_user_context(),
+        )
+
+    @app.get("/configuracion/logs")
+    def configuracion_logs():
+        r = require_admin()
+        if r:
+            return r
+
+        return render_template(
+            "configuracion.html",
+            title="Logs de uso",
+            config_section="logs",
+            config_title="Revisar logs de uso",
+            config_subtitle="Filtra actividad de la aplicacion, usuarios y respuestas HTTP.",
+            config_nav=config_shortcuts("logs"),
             **admin_logs_context(),
-            **data_editor_context(selected_file),
         )
 
     @app.post("/configuracion/caja")
@@ -642,7 +1569,7 @@ def create_app() -> Flask:
             new_balance = round(parse_decimal(saldo_raw), 2)
         except ValueError:
             flash("Saldo de caja no válido.")
-            return redirect_to_config("saldo-caja")
+            return redirect_to_config("caja")
 
         previous_balance = get_cash_balance(config.CSV_CAJA)
         set_cash_balance(
@@ -657,41 +1584,9 @@ def create_app() -> Flask:
             "AJUSTE CAJA",
             f"Saldo {previous_balance:.2f} -> {new_balance:.2f}. Nota: {note or '-'}",
         )
+        refresh_cash_analysis_storage()
         flash("Saldo de caja actualizado ✅")
-        return redirect_to_config("saldo-caja")
-
-    @app.post("/configuracion/datos")
-    def actualizar_datos_manualmente():
-        r = require_admin()
-        if r:
-            return r
-
-        file_key = (request.form.get("file_key") or "").strip().lower()
-        source = get_editable_data_source(file_key)
-        if not source:
-            flash("Archivo de datos no válido.")
-            return redirect_to_config("datos-manuales")
-
-        headers = list(source["headers"])
-        row_ids = request.form.getlist("row_id[]")
-        rows: list[dict[str, str]] = []
-        for row_id in row_ids:
-            row = {
-                header: (request.form.get(f"cell__{row_id}__{header}") or "").strip()
-                for header in headers
-            }
-            if not any(value != "" for value in row.values()):
-                continue
-            rows.append(row)
-
-        write_all_atomic(
-            source["path"],
-            rows,
-            headers,
-            backup_dir=config.BACKUP_DIR,
-        )
-        flash(f"Archivo {source['label']} actualizado ✅ ({len(rows)} filas)")
-        return redirect(url_for("configuracion", file=file_key, _anchor="datos-manuales"))
+        return redirect_to_config("caja")
 
     @app.get("/")
     def root():
@@ -729,8 +1624,19 @@ def create_app() -> Flask:
             if not is_low_stock:
                 continue
             attention_products.append(product_summary)
-        attention_products.sort(key=lambda row: (safe_float(row["stock_label"]) - safe_float(row["stock_minimo_label"]), row["nombre"].lower()))
-        shopping_products.sort(key=lambda row: (0 if row["low_stock"] else 1, row["nombre"].lower()))
+        attention_products.sort(
+            key=lambda row: (
+                -(safe_float(row["stock_minimo_label"]) - safe_float(row["stock_label"])),
+                row["nombre"].lower(),
+            )
+        )
+        shopping_products.sort(
+            key=lambda row: (
+                0 if row["low_stock"] else 1,
+                -(safe_float(row["stock_minimo_label"]) - safe_float(row["stock_label"])) if row["low_stock"] else 0,
+                row["nombre"].lower(),
+            )
+        )
 
         invoices = list_invoices(config.CSV_FACTURAS, limit=6)
         if not user_is_admin():
@@ -794,11 +1700,207 @@ def create_app() -> Flask:
             "home.html",
             title="Pantalla principal",
             home_stats=snapshot,
-            cash_state=get_cashbox_state(config.CSV_CAJA),
+            cash_state=get_cashbox_state(config.CSV_CAJA) if user_is_admin() else None,
             recent_activity=recent_activity[:6],
             attention_products=attention_products,
             shopping_products=shopping_products,
         )
+
+    @app.get("/analisis")
+    def analisis():
+        r = require_admin()
+        if r:
+            return r
+
+        refresh_cash_analysis_storage()
+
+        default_from, default_to = analysis_detail_range_defaults()
+        start_date = parse_query_date(request.args.get("from", ""), default_from)
+        end_date = parse_query_date(request.args.get("to", ""), default_to)
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
+
+        annual_year_options = analysis_available_years(config.CSV_CAJA_MOVIMIENTOS)
+        current_year = date.today().year
+        selected_annual_year = parse_analysis_year(
+            request.args.get("year", ""),
+            current_year,
+            annual_year_options,
+        )
+        current_view = (request.args.get("view") or "detalle").strip().lower()
+        if current_view not in {"detalle", "resumen-anual"}:
+            current_view = "detalle"
+        selected_detail_types = normalize_analysis_detail_types(request.args.getlist("tipo"))
+
+        detail_rows_all = list_cash_detail_rows(
+            config.CSV_CAJA_MOVIMIENTOS,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        detail_rows = [
+            row for row in detail_rows_all
+            if not selected_detail_types or row.get("tipo") in selected_detail_types
+        ]
+        detail_summary = cash_detail_summary(
+            config.CSV_CAJA_MOVIMIENTOS,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        detail_preview_rows = detail_rows[:200]
+        detail_table_total = round(sum(safe_float(row.get("importe")) for row in detail_rows), 2)
+        annual_summary = build_analysis_annual_summary(selected_annual_year)
+
+        return render_template(
+            "analisis.html",
+            title="Analisis",
+            analysis_view=current_view,
+            analysis_views=[
+                {
+                    "key": "detalle",
+                    "label": "TABLA DE DETALLE",
+                    "description": "Exporta un Excel con el detalle filtrado del saldo de caja.",
+                    "href": url_for("analisis", **analysis_detail_query_params(start_date, end_date, selected_detail_types, view="detalle")),
+                    "active": current_view == "detalle",
+                },
+                {
+                    "key": "resumen-anual",
+                    "label": "RESUMEN ANUAL",
+                    "description": "Agrupa la caja por meses y resume el saldo del periodo.",
+                    "href": url_for("analisis", view="resumen-anual", year=selected_annual_year),
+                    "active": current_view == "resumen-anual",
+                },
+            ],
+            detail_filters={
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "tipos": selected_detail_types,
+            },
+            detail_type_options=analysis_detail_type_options(),
+            detail_rows=detail_preview_rows,
+            detail_rows_total=len(detail_rows),
+            detail_preview_limited=len(detail_rows) > len(detail_preview_rows),
+            detail_table_total=detail_table_total,
+            detail_summary=detail_summary,
+            detail_export_href=url_for("export_analisis_detalle", **analysis_detail_query_params(start_date, end_date, selected_detail_types)),
+            annual_filters={
+                "year": selected_annual_year,
+            },
+            annual_year_options=annual_year_options,
+            annual_summary=annual_summary,
+            annual_pdf_href=url_for("descargar_analisis_resumen_anual_pdf", year=selected_annual_year),
+        )
+
+    @app.get("/analisis/resumen-anual/pdf")
+    def descargar_analisis_resumen_anual_pdf():
+        r = require_admin()
+        if r:
+            return r
+
+        refresh_cash_analysis_storage()
+
+        annual_year_options = analysis_available_years(config.CSV_CAJA_MOVIMIENTOS)
+        current_year = date.today().year
+        selected_annual_year = parse_analysis_year(
+            request.args.get("year", ""),
+            current_year,
+            annual_year_options,
+        )
+        annual_summary = build_analysis_annual_summary(selected_annual_year)
+        markdown_text = build_analysis_annual_markdown(selected_annual_year, annual_summary)
+        pdf_bytes = build_markdown_pdf(f"Resumen anual {selected_annual_year}", markdown_text)
+
+        response = Response(pdf_bytes, mimetype="application/pdf")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="resumen_anual_{selected_annual_year}.pdf"'
+        )
+        return response
+
+    @app.get("/analisis/detalle/export")
+    def export_analisis_detalle():
+        r = require_admin()
+        if r:
+            return r
+
+        refresh_cash_analysis_storage()
+
+        default_from, default_to = analysis_detail_range_defaults()
+        start_date = parse_query_date(request.args.get("from", ""), default_from)
+        end_date = parse_query_date(request.args.get("to", ""), default_to)
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
+        selected_detail_types = normalize_analysis_detail_types(request.args.getlist("tipo"))
+
+        rows = list_cash_detail_rows(
+            config.CSV_CAJA_MOVIMIENTOS,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if selected_detail_types:
+            rows = [row for row in rows if row.get("tipo") in selected_detail_types]
+        workbook = build_cash_detail_workbook(rows)
+
+        response = Response(
+            workbook,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="analisis_detalle_{start_date.strftime("%Y%m%d")}_{end_date.strftime("%Y%m%d")}.xlsx"'
+        )
+        return response
+
+    @app.post("/listas/compra/imprimir")
+    def imprimir_lista_compra():
+        r = require_login()
+        if r:
+            return jsonify({"ok": False, "error": "Sesion no valida."}), 401
+
+        payload = request.get_json(silent=True) or {}
+        raw_ids = payload.get("product_ids") or []
+        if not isinstance(raw_ids, list):
+            return jsonify({"ok": False, "error": "La seleccion de productos no es valida."}), 400
+
+        selected_ids: list[str] = []
+        seen: set[str] = set()
+        for raw_id in raw_ids:
+            pid = str(raw_id or "").strip()
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            selected_ids.append(pid)
+
+        if not selected_ids:
+            return jsonify({"ok": False, "error": "Selecciona al menos un producto."}), 400
+
+        products = {
+            p.get("producto_id", ""): p
+            for p in get_products(config.CSV_PRODUCTOS)
+            if p.get("stock_infinito", "0") != "1"
+        }
+        stock_map = calc_stock_by_product(config.CSV_MOVS)
+
+        items: list[dict[str, str]] = []
+        for pid in selected_ids:
+            product = products.get(pid)
+            if not product:
+                continue
+            current_stock = stock_map.get(pid, 0.0)
+            stock_min = safe_float(product.get("stock_minimo"))
+            items.append({
+                "nombre": product.get("nombre", ""),
+                "grupo_emoji": product.get("grupo_emoji", "📦"),
+                "stock_actual": format_compact_number(current_stock),
+                "stock_seguridad": format_compact_number(stock_min),
+            })
+
+        if not items:
+            return jsonify({"ok": False, "error": "No hay productos validos para imprimir."}), 400
+
+        try:
+            print_shopping_list_ticket(items)
+        except (ValueError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+        return jsonify({"ok": True, "message": "Lista enviada a la impresora conectada."})
 
     # -------- INVENTARIO --------
     @app.get("/inventario")
@@ -834,16 +1936,23 @@ def create_app() -> Flask:
             stock = stock_map.get(pid, 0.0)
             stock_min = float(p.get("stock_minimo") or 0.0)
             bajo_min = (False if infinito else (stock < stock_min))
+            stock_display_main, stock_display_meta = stock_display_parts(p, None if infinito else stock)
 
             rows.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
-                "unidad": p.get("unidad", "ud"),
+                "unidad": stock_unit_label(p),
+                "unidad_venta": sale_unit_label(p),
                 "grupo": p.get("grupo", "Otros"),
                 "grupo_emoji": p.get("grupo_emoji", "📦"),
                 "stock_infinito": "1" if infinito else "0",
+                "fraccionable": "1" if product_is_fractionable(p) else "0",
+                "fracciones_por_unidad": format_compact_number(product_fraction_count(p)),
+                "fraccion_info": fraction_info_label(p),
                 "stock_minimo": str(p.get("stock_minimo", "0")),
                 "total": None if infinito else stock,
+                "stock_display_main": stock_display_main,
+                "stock_display_meta": stock_display_meta,
                 "bajo_minimo": "1" if bajo_min else "0",
             })
         rows.sort(key=lambda x: x["nombre"].lower())
@@ -851,11 +1960,13 @@ def create_app() -> Flask:
         selected = find_product(config.CSV_PRODUCTOS, producto_id) if producto_id else None
 
         selected_stock = None
+        selected_sale_stock = None
         selected_purchases = []
         purchase_recommendation = None
         if selected:
             sel_inf = (selected.get("stock_infinito", "0") == "1")
             selected_stock = None if sel_inf else stock_map.get(producto_id, 0.0)
+            selected_sale_stock = None if selected_stock is None else stock_quantity_to_sale_quantity(selected, selected_stock)
             selected_purchases = last_purchases_for_product(config.CSV_MOVS, producto_id, limit=300)
             latest_purchase_price = 0.0
             latest_purchase_date = ""
@@ -867,11 +1978,19 @@ def create_app() -> Flask:
                     latest_purchase_date = (movement.get("fecha") or "")[:10]
                     break
             if latest_purchase_price > 0:
+                recommendation_price = latest_purchase_price
+                recommendation_unit = stock_unit_label(selected)
+                purchase_reference = ""
+                if product_is_fractionable(selected):
+                    recommendation_price = latest_purchase_price / product_fraction_count(selected)
+                    recommendation_unit = sale_unit_label(selected)
+                    purchase_reference = f"Ultima compra registrada: {latest_purchase_price:.2f} € / {stock_unit_label(selected)}"
                 purchase_recommendation = {
-                    "ultima_compra": latest_purchase_price,
-                    "recomendado": round(latest_purchase_price * 1.2, 2),
+                    "ultima_compra": recommendation_price,
+                    "recomendado": round(recommendation_price * 1.2, 2),
                     "fecha": latest_purchase_date,
-                    "unidad": selected.get("unidad", "ud"),
+                    "unidad": recommendation_unit,
+                    "referencia_compra": purchase_reference,
                 }
 
         inventory_summary = {
@@ -887,6 +2006,7 @@ def create_app() -> Flask:
             products_table=rows,
             selected=selected,
             selected_stock=selected_stock,
+            selected_sale_stock=selected_sale_stock,
             selected_purchases=selected_purchases,
             purchase_recommendation=purchase_recommendation,
             group_options=group_options,
@@ -906,6 +2026,9 @@ def create_app() -> Flask:
         stock_minimo = (request.form.get("stock_minimo", "0") or "0").strip()
         stock_actual = (request.form.get("stock_actual", "") or "").strip()
         stock_infinito = "1" if request.form.get("stock_infinito") == "on" else "0"
+        fraccionable = "1" if request.form.get("fraccionable") == "on" else "0"
+        fracciones_por_unidad_raw = (request.form.get("fracciones_por_unidad", "1") or "1").strip()
+        unidad_venta_raw = (request.form.get("unidad_venta", "") or "").strip()
 
         grupo_select = (request.form.get("grupo_select") or "").strip()
 
@@ -934,6 +2057,24 @@ def create_app() -> Flask:
             flash("El nombre del producto es obligatorio.")
             return inventario_redirect_with_filters()
 
+        if fraccionable == "1":
+            if not unidad_venta_raw:
+                flash("Si el producto es fraccionable, debes indicar la unidad de venta.")
+                return inventario_redirect_with_filters()
+            try:
+                fracciones_por_unidad = parse_decimal(fracciones_por_unidad_raw)
+            except ValueError:
+                flash("Fracciones por unidad no válido. Debe ser un número.")
+                return inventario_redirect_with_filters()
+            if fracciones_por_unidad <= 0:
+                flash("Fracciones por unidad debe ser mayor que 0.")
+                return inventario_redirect_with_filters()
+            unidad_venta = unidad_venta_raw
+            fracciones_por_unidad_clean = format_compact_number(fracciones_por_unidad)
+        else:
+            unidad_venta = unidad
+            fracciones_por_unidad_clean = "1"
+
         stock_actual_value = None
         if stock_infinito == "0":
             if stock_actual == "":
@@ -941,10 +2082,8 @@ def create_app() -> Flask:
                 return inventario_redirect_with_filters()
             try:
                 stock_actual_value = float(stock_actual.replace(",", "."))
-                if stock_actual_value < 0:
-                    raise ValueError
             except ValueError:
-                flash("Stock actual no válido. Debe ser un número mayor o igual que 0.")
+                flash("Stock actual no válido. Debe ser un número.")
                 return inventario_redirect_with_filters()
 
         pid = create_product(
@@ -956,6 +2095,9 @@ def create_app() -> Flask:
             grupo=grupo,
             grupo_emoji=grupo_emoji,
             stock_infinito=stock_infinito,
+            fraccionable=fraccionable,
+            fracciones_por_unidad=fracciones_por_unidad_clean,
+            unidad_venta=unidad_venta,
         )
         if stock_actual_value is not None:
             set_stock_to_value(config.CSV_MOVS, pid, desired_stock=stock_actual_value)
@@ -979,11 +2121,31 @@ def create_app() -> Flask:
         unidad = request.form.get("unidad", "").strip() or "ud"
         stock_minimo = request.form.get("stock_minimo", "").strip() or "0"
         stock_actual_raw = request.form.get("stock_actual", "").strip()
+        fraccionable = "1" if request.form.get("fraccionable") == "on" else "0"
+        fracciones_por_unidad_raw = (request.form.get("fracciones_por_unidad", "1") or "1").strip()
+        unidad_venta_raw = (request.form.get("unidad_venta", "") or "").strip()
 
         grupo = request.form.get("grupo", "Otros").strip() or "Otros"
         grupo_emoji = request.form.get("grupo_emoji", "📦").strip() or "📦"
 
         stock_infinito = "1" if request.form.get("stock_infinito") == "on" else "0"
+        if fraccionable == "1":
+            if not unidad_venta_raw:
+                flash("Debes indicar la unidad de venta para un producto fraccionable.")
+                return inventario_redirect_with_filters(producto_id=producto_id)
+            try:
+                fracciones_por_unidad = parse_decimal(fracciones_por_unidad_raw)
+            except ValueError:
+                flash("Fracciones por unidad no válido. Debe ser un número.")
+                return inventario_redirect_with_filters(producto_id=producto_id)
+            if fracciones_por_unidad <= 0:
+                flash("Fracciones por unidad debe ser mayor que 0.")
+                return inventario_redirect_with_filters(producto_id=producto_id)
+            unidad_venta = unidad_venta_raw
+            fracciones_por_unidad_clean = format_compact_number(fracciones_por_unidad)
+        else:
+            unidad_venta = unidad
+            fracciones_por_unidad_clean = "1"
         if stock_infinito == "1":
             stock_minimo = "0"
             stock_actual_value = None
@@ -993,10 +2155,8 @@ def create_app() -> Flask:
                 return inventario_redirect_with_filters(producto_id=producto_id)
             try:
                 stock_actual_value = float(stock_actual_raw.replace(",", "."))
-                if stock_actual_value < 0:
-                    raise ValueError
             except ValueError:
-                flash("Stock actual no válido. Debe ser un número mayor o igual que 0.")
+                flash("Stock actual no válido. Debe ser un número.")
                 return inventario_redirect_with_filters(producto_id=producto_id)
 
         update_product_fields(
@@ -1011,6 +2171,9 @@ def create_app() -> Flask:
                 "grupo": grupo,
                 "grupo_emoji": grupo_emoji,
                 "stock_infinito": stock_infinito,
+                "fraccionable": fraccionable,
+                "fracciones_por_unidad": fracciones_por_unidad_clean,
+                "unidad_venta": unidad_venta,
             },
         )
         if stock_actual_value is not None:
@@ -1057,22 +2220,31 @@ def create_app() -> Flask:
         infinite_stock = 0
         for p in prods:
             pid = p.get("producto_id", "")
-            unit = p.get("unidad", "ud")
+            stock_unit = stock_unit_label(p)
+            sale_unit = sale_unit_label(p)
             infinito = (p.get("stock_infinito", "0") == "1")
             current_stock = None if infinito else stock_map.get(pid, 0.0)
             group_name = p.get("grupo", "Otros")
             group_emoji = p.get("grupo_emoji", "📦")
+            stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
             groups_map[group_name] = group_emoji
             product_options.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
-                "unidad": unit,
+                "unidad_stock": stock_unit,
+                "unidad_venta": sale_unit,
                 "grupo": group_name,
                 "grupo_emoji": group_emoji,
+                "fraccionable": "1" if product_is_fractionable(p) else "0",
+                "fracciones_por_unidad": format_compact_number(product_fraction_count(p)),
+                "fraccion_info": fraction_info_label(p),
                 "stock_infinito": "1" if infinito else "0",
                 "stock_actual": current_stock,
+                "stock_display_main": stock_display_main,
+                "stock_display_meta": stock_display_meta,
                 "precio_unitario": p.get("precio_unitario", ""),
                 "stock_bajo": "1" if (current_stock is not None and current_stock < safe_float(p.get("stock_minimo"))) else "0",
+                "stock_negative": "1" if (current_stock is not None and current_stock < 0) else "0",
                 "stock_zero": "1" if (current_stock is not None and current_stock <= 0) else "0",
             })
             if infinito:
@@ -1102,7 +2274,14 @@ def create_app() -> Flask:
         if r:
             return r
 
-        cliente = (request.form.get("cliente") or "").strip()
+        wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        def fail(message: str, status: int = 400):
+            if wants_json:
+                return jsonify({"ok": False, "error": message}), status
+            flash(message)
+            return redirect_with_list_filters("nueva_factura")
+
         nota_global = (request.form.get("nota_global") or "").strip()
         invoice_date = (request.form.get("fecha_factura") or "").strip()
 
@@ -1110,97 +2289,71 @@ def create_app() -> Flask:
             try:
                 date.fromisoformat(invoice_date)
             except ValueError:
-                flash("Fecha de factura no válida.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail("Fecha de factura no válida.")
         else:
             invoice_date = date.today().isoformat()
 
         product_ids = request.form.getlist("producto_id[]")
         quantities = request.form.getlist("cantidad[]")
         prices = request.form.getlist("precio_unitario[]")
-        notes = request.form.getlist("nota_linea[]")
 
-        max_len = max(len(product_ids), len(quantities), len(prices), len(notes), 0)
+        max_len = max(len(product_ids), len(quantities), len(prices), 0)
         if max_len == 0:
-            flash("No se recibieron líneas de factura.")
-            return redirect_with_list_filters("nueva_factura")
+            return fail("No se recibieron líneas de factura.")
 
         products = get_products(config.CSV_PRODUCTOS)
         product_map = {p.get("producto_id"): p for p in products}
-        stock_map = calc_stock_by_product(config.CSV_MOVS)
-        consumed_by_pid: dict[str, float] = {}
 
         lines = []
         for i in range(max_len):
             pid = (product_ids[i] if i < len(product_ids) else "").strip()
             qty_raw = (quantities[i] if i < len(quantities) else "").strip()
-            price_raw = (prices[i] if i < len(prices) else "").strip()
-            note_raw = (notes[i] if i < len(notes) else "").strip()
+            _price_raw = (prices[i] if i < len(prices) else "").strip()
 
-            if not pid and not qty_raw and not price_raw and not note_raw:
+            if not pid and not qty_raw and not _price_raw:
                 continue
 
             if not pid:
-                flash(f"Línea {i+1}: debes seleccionar un producto.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: debes seleccionar un producto.")
             product = product_map.get(pid)
             if not product:
-                flash(f"Línea {i+1}: producto no válido o inactivo.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: producto no válido o inactivo.")
 
             if not qty_raw:
-                flash(f"Línea {i+1}: la cantidad es obligatoria.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: la cantidad es obligatoria.")
             try:
                 qty = parse_decimal(qty_raw)
             except ValueError:
-                flash(f"Línea {i+1}: cantidad no válida.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: cantidad no válida.")
             if qty <= 0:
-                flash(f"Línea {i+1}: la cantidad debe ser mayor que 0.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: la cantidad debe ser mayor que 0.")
 
-            if not price_raw:
-                flash(f"Línea {i+1}: el precio unitario es obligatorio.")
-                return redirect_with_list_filters("nueva_factura")
             try:
-                price = parse_decimal(price_raw)
+                price = round(parse_decimal(product.get("precio_unitario") or "0"), 2)
             except ValueError:
-                flash(f"Línea {i+1}: precio unitario no válido.")
-                return redirect_with_list_filters("nueva_factura")
+                return fail(f"Línea {i+1}: el producto {product.get('nombre', pid)} no tiene un precio válido en inventario.")
             if price < 0:
-                flash(f"Línea {i+1}: precio unitario no puede ser negativo.")
-                return redirect_with_list_filters("nueva_factura")
-
-            is_inf = (product.get("stock_infinito", "0") == "1")
-            if not is_inf:
-                available = stock_map.get(pid, 0.0) - consumed_by_pid.get(pid, 0.0)
-                if qty > available + 1e-9:
-                    pname = product.get("nombre", pid)
-                    avail_text = f"{available:.2f}".rstrip("0").rstrip(".")
-                    flash(f"Línea {i+1}: stock insuficiente para {pname}. Disponible: {avail_text}.")
-                    return redirect_with_list_filters("nueva_factura")
-                consumed_by_pid[pid] = consumed_by_pid.get(pid, 0.0) + qty
+                return fail(f"Línea {i+1}: el producto {product.get('nombre', pid)} tiene un precio negativo en inventario.")
 
             lines.append({
                 "producto_id": pid,
                 "producto_nombre": product.get("nombre", ""),
-                "unidad": product.get("unidad", "ud"),
+                "unidad": sale_unit_label(product),
                 "cantidad": str(qty),
+                "stock_cantidad": str(sale_quantity_to_stock_quantity(product, qty)),
                 "precio_unitario": f"{price:.2f}",
-                "nota": note_raw,
+                "nota": "",
             })
 
         if not lines:
-            flash("Añade al menos una línea de factura válida.")
-            return redirect_with_list_filters("nueva_factura")
+            return fail("Añade al menos una línea de factura válida.")
 
         factura_id, total = create_invoice(
             config.CSV_FACTURAS,
             config.CSV_FACTURA_LINEAS,
             config.CSV_MOVS,
             lines=lines,
-            cliente=cliente,
+            cliente="",
             nota_global=nota_global,
             invoice_date=invoice_date,
             user=session.get("user", ""),
@@ -1212,12 +2365,29 @@ def create_app() -> Flask:
                 updated_by=session.get("user", ""),
                 note=f"Factura {factura_id}",
             )
+        print_warning = ""
         try:
             print_invoice_ticket(factura_id)
-            flash("Factura enviada a la impresora conectada.")
+            if not wants_json:
+                flash("Factura enviada a la impresora conectada.")
         except (ValueError, RuntimeError) as exc:
-            flash(f"No se pudo imprimir la factura: {exc}")
-        flash(f"Factura registrada ✅ ({len(lines)} líneas, total {total:.2f} €, ref: {factura_id})")
+            print_warning = f"No se pudo imprimir la factura: {exc}"
+            if not wants_json:
+                flash(print_warning)
+
+        refresh_cash_analysis_storage()
+        success_message = f"Factura registrada ✅ ({len(lines)} líneas, total {total:.2f} €, ref: {factura_id})"
+        if wants_json:
+            return jsonify({
+                "ok": True,
+                "factura_id": factura_id,
+                "total": f"{total:.2f}",
+                "redirect_url": url_for("home"),
+                "message": success_message,
+                "print_warning": print_warning,
+            })
+
+        flash(success_message)
         return redirect_with_list_filters("nueva_factura")
 
     @app.get("/facturas/historial")
@@ -1509,22 +2679,31 @@ def create_app() -> Flask:
         infinite_stock = 0
         for p in prods:
             pid = p.get("producto_id", "")
-            unit = p.get("unidad", "ud")
+            stock_unit = stock_unit_label(p)
+            sale_unit = sale_unit_label(p)
             infinito = (p.get("stock_infinito", "0") == "1")
             current_stock = None if infinito else stock_map.get(pid, 0.0)
             group_name = p.get("grupo", "Otros")
             group_emoji = p.get("grupo_emoji", "📦")
+            stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
             groups_map[group_name] = group_emoji
             product_options.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
-                "unidad": unit,
+                "unidad_stock": stock_unit,
+                "unidad_venta": sale_unit,
                 "grupo": group_name,
                 "grupo_emoji": group_emoji,
                 "precio_venta_actual": (p.get("precio_unitario") or "").strip(),
+                "fraccionable": "1" if product_is_fractionable(p) else "0",
+                "fracciones_por_unidad": format_compact_number(product_fraction_count(p)),
+                "fraccion_info": fraction_info_label(p),
                 "stock_infinito": "1" if infinito else "0",
                 "stock_actual": current_stock,
+                "stock_display_main": stock_display_main,
+                "stock_display_meta": stock_display_meta,
                 "stock_bajo": "1" if (current_stock is not None and current_stock < safe_float(p.get("stock_minimo"))) else "0",
+                "stock_negative": "1" if (current_stock is not None and current_stock < 0) else "0",
                 "stock_zero": "1" if (current_stock is not None and current_stock <= 0) else "0",
             })
             if infinito:
@@ -1553,8 +2732,14 @@ def create_app() -> Flask:
         r = require_login()
         if r:
             return r
+        wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
-        provider = (request.form.get("proveedor") or "").strip()
+        def fail(message: str):
+            if wants_json:
+                return jsonify({"ok": False, "error": message}), 400
+            flash(message)
+            return redirect_with_list_filters("nueva_compra")
+
         global_note = (request.form.get("nota_global") or "").strip()
         purchase_date = (request.form.get("fecha_compra") or "").strip()
 
@@ -1563,91 +2748,96 @@ def create_app() -> Flask:
                 # formato esperado del input type="date"
                 date.fromisoformat(purchase_date)
             except ValueError:
-                flash("Fecha de compra no válida.")
-                return redirect_with_list_filters("nueva_compra")
+                return fail("Fecha de compra no válida.")
         else:
             purchase_date = date.today().isoformat()
 
         product_ids = request.form.getlist("producto_id[]")
         quantities = request.form.getlist("cantidad[]")
         prices = request.form.getlist("precio_compra[]")
+        subtotals = request.form.getlist("subtotal_compra[]")
+        sale_prices = request.form.getlist("precio_venta_actual[]")
         notes = request.form.getlist("nota_linea[]")
 
-        max_len = max(len(product_ids), len(quantities), len(prices), len(notes), 0)
+        max_len = max(len(product_ids), len(quantities), len(prices), len(subtotals), len(sale_prices), len(notes), 0)
         if max_len == 0:
-            flash("No se recibieron líneas de compra.")
-            return redirect_with_list_filters("nueva_compra")
+            return fail("No se recibieron líneas de compra.")
 
         # Validación de productos activos existentes.
         product_map = {p.get("producto_id"): p for p in get_products(config.CSV_PRODUCTOS)}
 
         lines = []
+        purchase_total = 0.0
+        sale_price_updates: dict[str, str] = {}
         for i in range(max_len):
             pid = (product_ids[i] if i < len(product_ids) else "").strip()
             qty_raw = (quantities[i] if i < len(quantities) else "").strip()
             price_raw = (prices[i] if i < len(prices) else "").strip()
+            subtotal_raw = (subtotals[i] if i < len(subtotals) else "").strip()
+            sale_price_raw = (sale_prices[i] if i < len(sale_prices) else "").strip()
             note_raw = (notes[i] if i < len(notes) else "").strip()
 
             # línea completamente vacía -> se ignora
-            if not pid and not qty_raw and not price_raw and not note_raw:
+            if not pid and not qty_raw and not price_raw and not subtotal_raw and not sale_price_raw and not note_raw:
                 continue
 
             if not pid:
-                flash(f"Línea {i+1}: debes seleccionar un producto.")
-                return redirect_with_list_filters("nueva_compra")
+                return fail(f"Línea {i+1}: debes seleccionar un producto.")
             if pid not in product_map:
-                flash(f"Línea {i+1}: producto no válido o inactivo.")
-                return redirect_with_list_filters("nueva_compra")
-            if (product_map[pid].get("stock_infinito", "0") == "1"):
-                flash(f"Línea {i+1}: no puedes registrar compras de productos con stock infinito.")
-                return redirect_with_list_filters("nueva_compra")
-
+                return fail(f"Línea {i+1}: producto no válido o inactivo.")
             if not qty_raw:
-                flash(f"Línea {i+1}: la cantidad es obligatoria.")
-                return redirect_with_list_filters("nueva_compra")
+                return fail(f"Línea {i+1}: la cantidad es obligatoria.")
 
             try:
                 qty = float(qty_raw.replace(",", "."))
             except ValueError:
-                flash(f"Línea {i+1}: cantidad no válida.")
-                return redirect_with_list_filters("nueva_compra")
+                return fail(f"Línea {i+1}: cantidad no válida.")
             if qty <= 0:
-                flash(f"Línea {i+1}: la cantidad debe ser mayor que 0.")
-                return redirect_with_list_filters("nueva_compra")
+                return fail(f"Línea {i+1}: la cantidad debe ser mayor que 0.")
 
+            product = product_map[pid]
             price_clean = ""
-            if price_raw:
+            is_fractional = product_is_fractionable(product)
+            price_source_raw = subtotal_raw if is_fractional else price_raw
+            if price_source_raw:
                 try:
-                    price = float(price_raw.replace(",", "."))
+                    entered_price = float(price_source_raw.replace(",", "."))
                 except ValueError:
-                    flash(f"Línea {i+1}: precio de compra no válido.")
-                    return redirect_with_list_filters("nueva_compra")
-                if price < 0:
-                    flash(f"Línea {i+1}: precio de compra no puede ser negativo.")
-                    return redirect_with_list_filters("nueva_compra")
-                price_clean = f"{price:.2f}"
+                    return fail(f"Línea {i+1}: {'subtotal' if is_fractional else 'precio de compra'} no válido.")
+                if entered_price < 0:
+                    return fail(f"Línea {i+1}: {'subtotal' if is_fractional else 'precio de compra'} no puede ser negativo.")
+                pricing = purchase_price_breakdown(product, qty, entered_price)
+                purchase_total += pricing["line_total"]
+                price_clean = f"{pricing['unit_purchase_price']:.6f}".rstrip("0").rstrip(".")
+
+            if not sale_price_raw:
+                return fail(f"Línea {i+1}: el precio de venta actual es obligatorio.")
+
+            try:
+                sale_price = float(sale_price_raw.replace(",", "."))
+            except ValueError:
+                return fail(f"Línea {i+1}: precio de venta actual no válido.")
+            if sale_price < 0:
+                return fail(f"Línea {i+1}: precio de venta actual no puede ser negativo.")
+
+            sale_price_clean = f"{sale_price:.2f}"
 
             lines.append({
                 "producto_id": pid,
                 "cantidad": str(qty),
                 "precio_compra": price_clean,
                 "nota": note_raw,
+                "stock_infinito": product.get("stock_infinito", "0"),
             })
+            sale_price_updates[pid] = sale_price_clean
 
         if not lines:
-            flash("Añade al menos una línea de compra válida.")
-            return redirect_with_list_filters("nueva_compra")
-
-        purchase_total = sum(
-            float(line.get("cantidad") or 0) * float(line.get("precio_compra") or 0)
-            for line in lines
-            if str(line.get("precio_compra") or "").strip()
-        )
+            return fail("Añade al menos una línea de compra válida.")
 
         ref_id = add_purchase_entries(
             config.CSV_MOVS,
             lines=lines,
-            provider=provider,
+            provider="",
             global_note=global_note,
             purchase_date=purchase_date,
             user=session.get("user", ""),
@@ -1659,7 +2849,24 @@ def create_app() -> Flask:
                 updated_by=session.get("user", ""),
                 note=f"Compra {ref_id}",
             )
-        flash(f"Compra registrada ✅ ({len(lines)} líneas, ref: {ref_id})")
+        for producto_id, new_sale_price in sale_price_updates.items():
+            update_product_fields(
+                config.CSV_PRODUCTOS,
+                backup_dir=config.BACKUP_DIR,
+                producto_id=producto_id,
+                fields={"precio_unitario": new_sale_price},
+            )
+        refresh_cash_analysis_storage()
+        success_message = f"Compra registrada ✅ ({len(lines)} líneas, ref: {ref_id})"
+        if wants_json:
+            return jsonify({
+                "ok": True,
+                "ref_id": ref_id,
+                "total": f"{purchase_total:.2f}",
+                "redirect_url": url_for("home"),
+                "message": success_message,
+            })
+        flash(success_message)
         return redirect_with_list_filters("nueva_compra")
 
     @app.get("/gastos/nuevo")
@@ -1672,7 +2879,10 @@ def create_app() -> Flask:
             "gasto_nuevo.html",
             title="Nuevo gasto libre",
             today_iso=date.today().isoformat(),
-            categories=FREE_EXPENSE_CATEGORIES,
+            categories=[
+                {"value": category, "label": free_expense_category_label(category)}
+                for category in FREE_EXPENSE_CATEGORIES
+            ],
         )
 
     @app.post("/gastos/nuevo")
@@ -1680,6 +2890,13 @@ def create_app() -> Flask:
         r = require_login()
         if r:
             return r
+        wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        def fail(message: str):
+            if wants_json:
+                return jsonify({"ok": False, "error": message}), 400
+            flash(message)
+            return redirect(url_for("nuevo_gasto_libre"))
 
         expense_date = (request.form.get("fecha_gasto") or "").strip()
         category = (request.form.get("categoria") or "").strip()
@@ -1690,27 +2907,22 @@ def create_app() -> Flask:
             try:
                 date.fromisoformat(expense_date)
             except ValueError:
-                flash("Fecha de gasto no válida.")
-                return redirect(url_for("nuevo_gasto_libre"))
+                return fail("Fecha de gasto no válida.")
         else:
             expense_date = date.today().isoformat()
 
         if category not in FREE_EXPENSE_CATEGORIES:
-            flash("Categoría de gasto no válida.")
-            return redirect(url_for("nuevo_gasto_libre"))
+            return fail("Categoría de gasto no válida.")
 
         if not description:
-            flash("La descripción es obligatoria.")
-            return redirect(url_for("nuevo_gasto_libre"))
+            return fail("La descripción es obligatoria.")
 
         try:
             amount = round(parse_decimal(amount_raw), 2)
         except ValueError:
-            flash("Importe no válido.")
-            return redirect(url_for("nuevo_gasto_libre"))
+            return fail("Importe no válido.")
         if amount <= 0:
-            flash("El importe debe ser mayor que 0.")
-            return redirect(url_for("nuevo_gasto_libre"))
+            return fail("El importe debe ser mayor que 0.")
 
         expense_id, total = create_free_expense(
             config.CSV_GASTOS_LIBRES,
@@ -1726,7 +2938,17 @@ def create_app() -> Flask:
             updated_by=session.get("user", ""),
             note=f"Gasto libre {expense_id}",
         )
-        flash(f"Gasto libre registrado ✅ ({total:.2f} €, ref: {expense_id})")
+        refresh_cash_analysis_storage()
+        success_message = f"Gasto libre registrado ✅ ({total:.2f} €, ref: {expense_id})"
+        if wants_json:
+            return jsonify({
+                "ok": True,
+                "expense_id": expense_id,
+                "total": f"{total:.2f}",
+                "redirect_url": url_for("home"),
+                "message": success_message,
+            })
+        flash(success_message)
         return redirect(url_for("nuevo_gasto_libre"))
 
     @app.get("/gastos/historial")
@@ -1754,6 +2976,14 @@ def create_app() -> Flask:
                 row for row in expenses
                 if matches_date_window(row.get("fecha", ""), current_from, current_to)
             ]
+
+        expenses = [
+            {
+                **row,
+                "categoria_label": free_expense_category_label(row.get("categoria", "")),
+            }
+            for row in expenses
+        ]
 
         history_summary = {
             "shown": len(expenses),

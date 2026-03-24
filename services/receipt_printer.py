@@ -85,16 +85,17 @@ def _qty_display(raw: str, width: int = 3) -> str:
 def _format_label_value(label: str, value: str, width: int = TICKET_WIDTH, min_dots: int = 2) -> list[str]:
     clean_label = _clean_inline(label)
     clean_value = _clean_inline(value)
-    prefix = f"{clean_label} "
+    prefix_base = f"{clean_label} "
 
     if not clean_value:
-        return [_fit(prefix.strip(), width)[0]]
+        return [_fit(prefix_base.strip(), width)[0]]
 
-    min_space = len(prefix) + min_dots + 1 + len(clean_value)
+    min_space = len(prefix_base) + min_dots + 1 + len(clean_value)
     if min_space <= width:
-        dots = "." * max(min_dots, width - len(prefix) - len(clean_value) - 1)
-        return [f"{prefix}{dots} {clean_value}"]
+        dots = "." * max(min_dots, width - len(prefix_base) - len(clean_value) - 1)
+        return [f"{prefix_base}{dots} {clean_value}"]
 
+    prefix = f"{prefix_base}{'.' * min_dots} "
     first_width = max(1, width - len(prefix))
     wrapped_value = _wrap_line(clean_value, first_width)
     lines = [f"{prefix}{wrapped_value[0]}"]
@@ -127,19 +128,17 @@ def _format_note_block(note: str, width: int = TICKET_WIDTH) -> list[str]:
 def _format_product_ticket_block(line: dict[str, str], width: int = TICKET_WIDTH) -> list[str]:
     qty = _qty_display(line.get("cantidad") or "0", width=3)
     product_name = _clean_inline(line.get("producto_nombre") or line.get("producto_id") or "Producto")
-    unit_price = _money(line.get("precio_unitario") or "0")
     line_total = _money(line.get("importe_linea") or "0")
 
-    prefix = f"{qty} "
-    suffix = unit_price
-    available_name = width - len(prefix) - len(suffix) - 1
+    qty_block = f"{qty} "
+    unit_block = f" ({_money(line.get('precio_unitario') or '0'):>5})"
+    total_block = f"{line_total:>6}"
+    available_name = max(1, width - len(qty_block) - len(unit_block) - len(total_block))
 
-    if available_name < 1:
-        available_name = 1
-
-    name = _truncate_with_ellipsis(product_name, available_name)
-    dots = "." * max(1, width - len(prefix) - len(name) - len(suffix))
-    return [f"{prefix}{name}{dots}{suffix}", line_total.rjust(width)]
+    visible_name = product_name[:available_name]
+    filler = "." * max(0, available_name - len(visible_name))
+    name_block = f"{visible_name}{filler}"
+    return [f"{qty_block}{name_block}{unit_block}{total_block}"]
 
 
 def _ticket_datetime(invoice: dict[str, str]) -> str:
@@ -151,22 +150,10 @@ def _ticket_datetime(invoice: dict[str, str]) -> str:
         except ValueError:
             try:
                 dt = datetime.strptime(raw_fecha[:10], "%Y-%m-%d")
-                fid = (invoice.get("factura_id") or "").strip()
-                if fid.startswith("FV-") and len(fid) >= 17:
-                    time_chunk = fid[3:17]
-                    created = datetime.strptime(time_chunk, "%Y%m%d%H%M%S")
-                    return f"{dt.strftime('%d/%m/%Y')} {created.strftime('%H:%M')}"
                 return dt.strftime("%d/%m/%Y 00:00")
             except ValueError:
                 pass
 
-    fid = (invoice.get("factura_id") or "").strip()
-    if fid.startswith("FV-") and len(fid) >= 17:
-        try:
-            dt = datetime.strptime(fid[3:17], "%Y%m%d%H%M%S")
-            return dt.strftime("%d/%m/%Y %H:%M")
-        except ValueError:
-            pass
     return datetime.now().strftime("%d/%m/%Y %H:%M")
 
 
@@ -213,8 +200,51 @@ def format_invoice_ticket(
         "",
         f"TOTAL {_money(invoice.get('total_importe') or '0')}".rjust(width),
         "",
+        "",
+        "",
+        "",
+        "",
     ])
 
+    return RAW_NEWLINE.join(ticket_lines)
+
+
+def format_shopping_list_ticket(
+    items: list[dict[str, str]],
+    width: int = TICKET_WIDTH,
+    title: str = "BUEN YANTAR",
+) -> str:
+    ticket_lines: list[str] = [
+        _center(title, width),
+        _center("LISTA DE LA COMPRA", width),
+        _rule("-", width),
+    ]
+
+    current_width = max(len(_clean_inline(item.get("stock_actual") or "0")) for item in items) if items else 1
+    safety_width = max(len(_clean_inline(item.get("stock_seguridad") or "0")) for item in items) if items else 1
+
+    for item in items:
+        name = _clean_inline(item.get("nombre") or "Producto")
+        stock_actual = _clean_inline(item.get("stock_actual") or "0").rjust(current_width)
+        stock_seguridad = _clean_inline(item.get("stock_seguridad") or "0").rjust(safety_width)
+        suffix = f"{stock_actual} ({stock_seguridad})"
+
+        min_dots = 3
+        max_name_len = max(1, width - len(suffix) - min_dots - 2)
+        fitted_name = name[:max_name_len]
+        dots = "." * max(min_dots, width - len(fitted_name) - len(suffix) - 2)
+
+        # Reajusta si el nombre recortado aun deja la linea larga por caracteres inesperados.
+        while len(fitted_name) + len(dots) + len(suffix) + 2 > width and len(fitted_name) > 1:
+            fitted_name = fitted_name[:-1]
+            dots = "." * max(min_dots, width - len(fitted_name) - len(suffix) - 2)
+
+        ticket_lines.append(f"{fitted_name} {dots} {suffix}")
+
+    ticket_lines.extend([
+        _rule("-", width),
+        "",
+    ])
     return RAW_NEWLINE.join(ticket_lines)
 
 

@@ -12,20 +12,24 @@
       <div class="home-action-group">
         <h3 class="home-group-title">Operativa</h3>
         <div class="action-grid home-action-grid">
-          <a class="action-card action-card-primary" href="{{ url_for('inventario') }}">
-            <h2>Inventario</h2>
-          </a>
-
-          <a class="action-card action-card-primary" href="{{ url_for('nueva_factura') }}">
+          <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nueva_factura') }}">
+            <span class="home-menu-emoji" aria-hidden="true">🧾</span>
             <h2>Nueva factura</h2>
           </a>
 
-          <a class="action-card action-card-primary" href="{{ url_for('nueva_compra') }}">
+          <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nueva_compra') }}">
+            <span class="home-menu-emoji" aria-hidden="true">🛒</span>
             <h2>Nueva compra</h2>
           </a>
 
-          <a class="action-card action-card-primary" href="{{ url_for('nuevo_gasto_libre') }}">
+          <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nuevo_gasto_libre') }}">
+            <span class="home-menu-emoji" aria-hidden="true">💸</span>
             <h2>Gasto libre</h2>
+          </a>
+
+          <a class="action-card action-card-primary home-menu-card" href="{{ url_for('inventario') }}">
+            <span class="home-menu-emoji" aria-hidden="true">📦</span>
+            <h2>Inventario</h2>
           </a>
         </div>
       </div>
@@ -33,41 +37,51 @@
       <div class="home-action-group">
         <h3 class="home-group-title">Consulta</h3>
         <div class="action-grid home-action-grid home-action-grid-secondary">
-          <a class="action-card action-card-short" href="{{ url_for('historial_facturas') }}">
-            <h2>Facturas</h2>
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_facturas') }}">
+            <span class="home-menu-emoji" aria-hidden="true">📄</span>
+            <h2>Historial Facturas</h2>
           </a>
 
-          <a class="action-card action-card-short" href="{{ url_for('historial_compras') }}">
-            <h2>Compras</h2>
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_compras') }}">
+            <span class="home-menu-emoji" aria-hidden="true">🛍️</span>
+            <h2>Historial Compras</h2>
           </a>
 
-          <a class="action-card action-card-short" href="{{ url_for('historial_gastos_libres') }}">
-            <h2>Gastos</h2>
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_gastos_libres') }}">
+            <span class="home-menu-emoji" aria-hidden="true">💳</span>
+            <h2>Historial Gastos</h2>
           </a>
 
-          {% if g.is_admin %}
-          <details class="admin-action-menu admin-action-menu-grid">
-            <summary class="action-card action-card-short admin-action-summary-card">
-              <h2>Configuracion</h2>
-            </summary>
-            <div class="admin-action-dropdown">
-              <a class="admin-action-link" href="{{ url_for('configuracion') }}#saldo-caja">Configurar saldo de caja</a>
-              <a class="admin-action-link" href="{{ url_for('configuracion') }}#usuarios-admin">Configurar usuarios</a>
-              <a class="admin-action-link" href="{{ url_for('configuracion') }}#logs-uso">Revisar logs de uso</a>
-              <a class="admin-action-link" href="{{ url_for('configuracion', file='productos') }}#datos-manuales">Editar archivos de datos manualmente</a>
-            </div>
-          </details>
-          {% else %}
-          <a class="action-card action-card-short" href="{{ url_for('gestion_usuarios') }}">
+          {% if not g.is_admin %}
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('gestion_usuarios') }}">
+            <span class="home-menu-emoji" aria-hidden="true">👤</span>
             <h2>Usuario</h2>
           </a>
           {% endif %}
         </div>
       </div>
+
+      {% if g.is_admin %}
+      <div class="home-action-group">
+        <h3 class="home-group-title">Administracion</h3>
+        <div class="action-grid home-action-grid home-action-grid-admin">
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('configuracion_caja') }}">
+            <span class="home-menu-emoji" aria-hidden="true">⚙️</span>
+            <h2>Configuracion</h2>
+          </a>
+
+          <a class="action-card action-card-short home-menu-card" href="{{ url_for('analisis') }}">
+            <span class="home-menu-emoji" aria-hidden="true">📈</span>
+            <h2>Analisis</h2>
+          </a>
+        </div>
+      </div>
+      {% endif %}
     </div>
   </section>
 
   <aside class="home-side-panels">
+    {% if g.is_admin and cash_state %}
     <section class="panel home-side-panel">
       <div class="section-head compact-head">
         <div>
@@ -83,18 +97,8 @@
         <span>Sin movimientos de caja registrados</span>
         {% endif %}
       </div>
-
-      <div class="home-mini-stats">
-        <div class="home-mini-stat">
-          <span>Productos</span>
-          <strong>{{ home_stats.total_products }}</strong>
-        </div>
-        <div class="home-mini-stat">
-          <span>Stock bajo</span>
-          <strong>{{ home_stats.low_stock }}</strong>
-        </div>
-      </div>
     </section>
+    {% endif %}
 
     <section class="panel home-side-panel">
       <div class="section-head compact-head">
@@ -155,7 +159,6 @@
         <h2 class="section-heading">Generar lista de la compra</h2>
         <p class="section-subtitle">Los productos con stock bajo aparecen ya seleccionados y marcados en rojo.</p>
       </div>
-      <button class="btn btn-secondary btn-small" type="button" id="closeShoppingListDialogTop">Cerrar</button>
     </div>
 
     <div class="shopping-dialog-body">
@@ -190,7 +193,6 @@
     const openButton = document.getElementById("openShoppingListDialog");
     const closeButtons = [
       document.getElementById("closeShoppingListDialog"),
-      document.getElementById("closeShoppingListDialogTop"),
     ].filter(Boolean);
     const inventoryList = document.getElementById("shoppingInventoryList");
     const selectedList = document.getElementById("shoppingSelectedList");
@@ -205,15 +207,6 @@
     const selectedIds = new Set(
       products.filter((product) => product.low_stock).map((product) => product.producto_id)
     );
-
-    function escapeHtml(value) {
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
-    }
 
     function selectedProducts() {
       return products.filter((product) => selectedIds.has(product.producto_id));
@@ -314,79 +307,37 @@
       });
     }
 
-    function printShoppingList() {
+    async function printShoppingList() {
       const selected = selectedProducts();
       if (!selected.length) {
         return;
       }
 
-      const rows = selected.map((product) => `
-        <tr>
-          <td>${escapeHtml(`${product.grupo_emoji} ${product.nombre}`)}</td>
-          <td>${escapeHtml(product.stock_label)}</td>
-          <td>${escapeHtml(product.stock_minimo_label)}</td>
-        </tr>
-      `).join("");
-
-      const popup = window.open("", "_blank", "width=760,height=860");
-      if (!popup) {
-        window.alert("No se pudo abrir la ventana de impresion.");
-        return;
+      printButton.disabled = true;
+      const originalText = printButton.textContent;
+      printButton.textContent = "Imprimiendo...";
+      try {
+        const response = await fetch("{{ url_for('imprimir_lista_compra') }}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            product_ids: selected.map((product) => product.producto_id),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "No se pudo imprimir la lista.");
+        }
+        dialog.close();
+        window.alert(payload.message || "Lista enviada a la impresora conectada.");
+      } catch (error) {
+        window.alert(error.message || "No se pudo imprimir la lista.");
+      } finally {
+        printButton.disabled = selectedProducts().length === 0;
+        printButton.textContent = originalText;
       }
-
-      popup.document.write(`
-        <!doctype html>
-        <html lang="es">
-        <head>
-          <meta charset="utf-8">
-          <title>Lista de la compra</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              margin: 2rem;
-              color: #111;
-            }
-            h1 {
-              margin: 0 0 1.5rem;
-              font-size: 1.8rem;
-              letter-spacing: 0.04em;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            th, td {
-              padding: 0.55rem 0.35rem;
-              border-bottom: 1px solid #d5d5d5;
-              text-align: left;
-              font-size: 0.98rem;
-            }
-            th {
-              font-weight: 700;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>LISTA DE LA COMPRA</h1>
-          <table>
-            <thead>
-              <tr>
-                <th>PRODUCTO</th>
-                <th>STOCK ACTUAL</th>
-                <th>STOCK SEGURIDAD</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </body>
-        </html>
-      `);
-      popup.document.close();
-      popup.focus();
-      window.setTimeout(() => {
-        popup.print();
-        window.setTimeout(() => popup.close(), 200);
-      }, 150);
     }
 
     openButton.addEventListener("click", () => {

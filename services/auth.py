@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 from typing import Dict, List, Optional
-from uuid import uuid4
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .csv_store import append_rows, read_all, write_all_atomic
+from .ids import short_id
 
 USERS_HEADERS = ["user_id", "username", "password_hash", "rol", "activo"]
 
@@ -32,7 +32,7 @@ def ensure_user_schema(users_csv: Path, backup_dir: Optional[Path] = None) -> No
             role = "admin" if username.lower() == "admin" else "normal"
 
         migrated.append({
-            "user_id": (r.get("user_id") or str(uuid4())).strip(),
+            "user_id": (r.get("user_id") or short_id()).strip(),
             "username": username,
             "password_hash": (r.get("password_hash") or "").strip(),
             "rol": role,
@@ -48,7 +48,7 @@ def ensure_default_admin(users_csv: Path) -> None:
         return
 
     row = {
-        "user_id": str(uuid4()),
+        "user_id": short_id(),
         "username": "admin",
         "password_hash": generate_password_hash("admin123"),
         "rol": "admin",
@@ -100,7 +100,7 @@ def create_user(users_csv: Path, username: str, password: str, rol: str = "norma
         role_clean = "normal"
 
     row = {
-        "user_id": str(uuid4()),
+        "user_id": short_id(),
         "username": username,
         "password_hash": generate_password_hash(password or ""),
         "rol": role_clean,

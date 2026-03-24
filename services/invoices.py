@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
-from uuid import uuid4
 
 from .csv_store import read_all, append_rows
+from .ids import prefixed_id, short_id
 from .inventory import MOV_HEADERS, now_iso
 
 INVOICE_HEADERS = [
@@ -34,7 +34,7 @@ INVOICE_LINE_HEADERS = [
 def _format_qty(value: float) -> str:
     if abs(value - int(value)) < 1e-9:
         return str(int(value))
-    return f"{value:.4f}".rstrip("0").rstrip(".")
+    return f"{value:.8f}".rstrip("0").rstrip(".")
 
 
 def _invoice_ts(invoice_date: str) -> str:
@@ -58,8 +58,7 @@ def create_invoice(
     invoice_date: str = "",
     user: str = "",
 ) -> Tuple[str, float]:
-    ts = datetime.now().strftime("%Y%m%d%H%M%S")
-    factura_id = f"FV-{ts}-{str(uuid4())[:8]}"
+    factura_id = prefixed_id("FV")
     move_ts = _invoice_ts(invoice_date)
 
     cliente = (cliente or "").strip()
@@ -75,6 +74,7 @@ def create_invoice(
         producto_nombre = (line.get("producto_nombre") or "").strip()
         unidad = (line.get("unidad") or "ud").strip() or "ud"
         cantidad = float(line.get("cantidad") or 0)
+        stock_cantidad = float(line.get("stock_cantidad") or cantidad)
         precio_unitario = float(line.get("precio_unitario") or 0)
         nota_linea = (line.get("nota") or "").strip()
 
@@ -82,7 +82,7 @@ def create_invoice(
         total += importe_linea
 
         line_rows.append({
-            "linea_id": str(uuid4()),
+            "linea_id": short_id(),
             "factura_id": factura_id,
             "producto_id": producto_id,
             "producto_nombre": producto_nombre,
@@ -103,11 +103,11 @@ def create_invoice(
             note_parts.append(nota_linea)
 
         mov_rows.append({
-            "mov_id": str(uuid4()),
+            "mov_id": short_id(),
             "fecha": move_ts,
             "producto_id": producto_id,
             "tipo": "SALIDA",
-            "cantidad": _format_qty(cantidad),
+            "cantidad": _format_qty(stock_cantidad),
             "origen": "FACTURA",
             "ref_id": factura_id,
             "nota": " | ".join(note_parts),

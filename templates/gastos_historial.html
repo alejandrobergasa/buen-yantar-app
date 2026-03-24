@@ -1,10 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro page-header-bar">
-  <div class="page-header-main">
-    <h1 class="page-title page-title-left">Historial de gastos libres</h1>
-  </div>
-</section>
 
 <section class="panel">
   <form method="get" class="form">
@@ -58,7 +53,7 @@
             </div>
           </td>
           <td>{{ (row.fecha or "")[:10] }}</td>
-          <td>{{ row.categoria }}</td>
+          <td>{{ row.categoria_label }}</td>
           <td>{{ row.descripcion }}</td>
           <td>{{ row.usuario or "-" }}</td>
           <td class="right">{{ row.importe }} €</td>

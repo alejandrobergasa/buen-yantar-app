@@ -15,34 +15,20 @@
     <div class="topbar-inner">
       <div class="brand-row">
         <div class="brand-wrap">
-          <a class="brand" href="{{ url_for('inventario') if request.endpoint == 'inventario' else url_for('home') }}">{% if request.endpoint == "inventario" %}Inventario{% else %}Sociedad gastronómica Buen Yantar{% endif %}</a>
+          <a
+            class="brand brand-home-link"
+            href="{{ url_for('home') }}"
+            aria-label="Sociedad Buen Yantar - Aplicación Gestora"
+          >Sociedad Buen Yantar - Aplicación Gestora</a>
         </div>
-
-        {% if session.get("user") %}
-        <div class="topbar-meta">
-          <span class="status-pill status-pill-user">Usuario: {{ session.get("user") }}</span>
-          <span class="status-pill">{% if g.is_admin %}Administrador{% else %}Operativa diaria{% endif %}</span>
-          <span class="status-pill">{{ today_label }}</span>
-        </div>
-        {% endif %}
       </div>
 
       {% if session.get("user") %}
-      <div class="topbar-actions">
-        <nav class="top-nav" aria-label="Secciones principales">
-          {% for item in shell_nav_items %}
-            <a class="nav-pill {% if request.endpoint in item.endpoints %}nav-pill-active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
-          {% endfor %}
-        </nav>
-
+      <div class="topbar-actions topbar-actions-simple">
         <nav class="top-actions" aria-label="Acciones de sesión">
-          <a class="link" href="{{ url_for('home') }}">Inicio</a>
-          <a class="link link-danger" href="{{ url_for('logout') }}">Salir</a>
+          <span class="status-pill status-pill-user">Usuario conectado: {{ session.get("user") }}</span>
+          <a class="link link-danger" href="{{ url_for('logout') }}">Cerrar sesion</a>
         </nav>
-      </div>
-      {% else %}
-      <div class="topbar-login-note">
-        <span class="status-pill">Acceso privado</span>
       </div>
       {% endif %}
     </div>
@@ -60,6 +46,53 @@
         if (item) item.remove();
       });
     });
+
+    (() => {
+      const toastKey = "buen-yantar:toast";
+      const raw = sessionStorage.getItem(toastKey);
+      if (!raw) return;
+      sessionStorage.removeItem(toastKey);
+
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch (error) {
+        return;
+      }
+
+      const host = document.createElement("div");
+      host.className = "flash floating-flash";
+
+      const item = document.createElement("div");
+      item.className = `flash-item floating-flash-item floating-flash-${payload.tone || "success"}`;
+
+      const textWrap = document.createElement("div");
+      const message = document.createElement("strong");
+      message.textContent = payload.message || "Operacion completada.";
+      textWrap.appendChild(message);
+
+      if (payload.detail) {
+        const detail = document.createElement("div");
+        detail.className = "floating-flash-detail";
+        detail.textContent = payload.detail;
+        textWrap.appendChild(detail);
+      }
+
+      const close = document.createElement("button");
+      close.className = "flash-close";
+      close.type = "button";
+      close.setAttribute("aria-label", "Cerrar mensaje");
+      close.textContent = "×";
+      close.addEventListener("click", () => host.remove());
+
+      item.append(textWrap, close);
+      host.appendChild(item);
+      document.body.appendChild(host);
+
+      window.setTimeout(() => {
+        host.remove();
+      }, 5000);
+    })();
   </script>
 </body>
 </html>

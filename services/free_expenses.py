@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
-from uuid import uuid4
 
 from .csv_store import append_rows, read_all
+from .ids import prefixed_id
 
 FREE_EXPENSE_HEADERS = [
     "gasto_id",
@@ -21,6 +21,22 @@ FREE_EXPENSE_CATEGORIES = [
     "Extra",
     "Traspaso Cuenta",
 ]
+
+FREE_EXPENSE_CATEGORY_EMOJIS = {
+    "Limpieza": "🧼",
+    "Extra": "📦",
+    "Traspaso Cuenta": "🏦",
+}
+
+
+def free_expense_category_label(category: str) -> str:
+    clean_category = (category or "").strip()
+    if not clean_category:
+        return "Sin categoria"
+    emoji = FREE_EXPENSE_CATEGORY_EMOJIS.get(clean_category)
+    if not emoji:
+        return clean_category
+    return f"{emoji} {clean_category}"
 
 
 def _expense_ts(expense_date: str) -> str:
@@ -43,7 +59,7 @@ def create_free_expense(
     expense_date: str = "",
     user: str = "",
 ) -> tuple[str, float]:
-    expense_id = f"GL-{datetime.now().strftime('%Y%m%d%H%M%S')}-{str(uuid4())[:8]}"
+    expense_id = prefixed_id("GL")
     amount_value = round(float(amount), 2)
     row = {
         "gasto_id": expense_id,

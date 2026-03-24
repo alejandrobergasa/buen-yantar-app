@@ -28,7 +28,7 @@ def list_purchase_history(
 ) -> Tuple[List[Dict[str, str]], Dict[str, List[Dict[str, str]]]]:
     rows = [
         m for m in read_all(movs_csv)
-        if (m.get("tipo") or "").strip().upper() == "ENTRADA"
+        if (m.get("tipo") or "").strip().upper() in {"ENTRADA", "INFO"}
         and (m.get("origen") or "").strip().upper() == "COMPRA"
     ]
     rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)

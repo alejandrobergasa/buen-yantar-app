@@ -6,14 +6,6 @@
       <div class="panel inv-panel">
         <div class="section-head compact-head">
           <h2 class="section-heading">Productos</h2>
-          <div class="inv-legend">
-            <span class="header-count" id="visibleProductsCount">{{ products_table|length }}</span>
-            <span class="badge">Estado</span>
-            <span class="product-state state-ok">OK</span>
-            <span class="product-state state-low">BAJO</span>
-            <span class="product-state state-zero">0</span>
-            <span class="product-state state-inf">INF</span>
-          </div>
         </div>
 
         <div class="inv-filters">
@@ -38,10 +30,6 @@
               <span>Mostrar solo bajo reserva</span>
             </label>
           </div>
-        </div>
-
-        <div class="toolbar-inline actions-end">
-          <button class="btn btn-secondary btn-small" id="inventoryClearFilters" type="button">Limpiar filtros</button>
         </div>
 
         <div class="inv-scrollbox" id="listBox">
@@ -78,16 +66,18 @@
                         <span class="product-state state-ok">OK</span>
                       {% endif %}
                     </div>
+                    {% if r.fraccionable == "1" %}
+                      <div class="help product-subtext">Compra en {{ r.unidad }} · Venta en {{ r.unidad_venta }} · {{ r.fraccion_info }}</div>
+                    {% endif %}
                   </td>
 
                   <td class="right">
                     {% if r.stock_infinito == "1" %}
                       ♾️
                     {% else %}
-                      {% if (r.total % 1) == 0 %}
-                        {{ "%.0f"|format(r.total) }} {{ r.unidad }}
-                      {% else %}
-                        {{ "%.2f"|format(r.total) }} {{ r.unidad }}
+                      <div class="stock-display-main">{{ r.stock_display_main }}</div>
+                      {% if r.stock_display_meta %}
+                        <div class="stock-display-meta">{{ r.stock_display_meta }}</div>
                       {% endif %}
                     {% endif %}
                   </td>
@@ -105,11 +95,23 @@
       <div class="panel inv-panel">
         <div class="section-head compact-head">
           <h2 class="section-heading" id="detailTitle">Detalle</h2>
+          {% if g.is_admin %}
+          <div class="actions inventory-detail-head-actions">
+            <button
+              class="btn btn-primary btn-small"
+              type="button"
+              id="inventoryNewProductBtn"
+              aria-expanded="false"
+              onclick="toggleNewProduct()"
+            >
+              Nuevo producto
+            </button>
+          </div>
+          {% endif %}
         </div>
 
         <div class="inv-detail-scroll">
           <div id="newProductMiddleBox" class="inv-newbox" style="display:none;">
-            <h3 class="inv-newbox-title">Crear producto</h3>
 
             <form method="post" action="{{ url_for('inventario_nuevo_producto') }}" class="form" id="newProdForm">
               <input type="hidden" name="f_q" value="{{ current_filters.q }}">
@@ -120,22 +122,39 @@
 
               <div class="grid-2">
                 <div>
-                  <label class="label">Precio / unidad</label>
+                  <label class="label">Precio venta / unidad</label>
                   <input class="input js-live-field" name="precio_unitario" data-rule="number" placeholder="Ej: 1.20">
                 </div>
                 <div>
-                  <label class="label">Unidad</label>
+                  <label class="label">Unidad compra / stock</label>
                   <input class="input js-live-field" name="unidad" data-rule="required" value="ud" placeholder="ud / kg / l">
                 </div>
               </div>
 
+              <label class="inv-check">
+                <input type="checkbox" name="fraccionable" class="js-fractionable-toggle">
+                <span>Producto fraccionable</span>
+              </label>
+
               <div class="grid-2">
                 <div>
-                  <label class="label">Minimo de reserva</label>
+                  <label class="label">Fracciones por unidad</label>
+                  <input class="input js-live-field js-fraction-count" name="fracciones_por_unidad" data-rule="positive-number-when-fractionable" value="1" placeholder="Ej: 14" disabled>
+                </div>
+                <div>
+                  <label class="label">Unidad de venta</label>
+                  <input class="input js-live-field js-sale-unit" name="unidad_venta" data-rule="required-when-fractionable" value="ud" placeholder="copa / porcion / vaso" disabled>
+                </div>
+              </div>
+              <div class="help">Si el producto es fraccionable, las compras y el stock siguen en la unidad de compra, pero las facturas usarán la unidad de venta.</div>
+
+              <div class="grid-2">
+                <div>
+                  <label class="label">Minimo de reserva (unidad compra / stock)</label>
                   <input class="input js-live-field" name="stock_minimo" data-rule="number" value="0">
                 </div>
                 <div>
-                  <label class="label">Stock actual</label>
+                  <label class="label">Stock actual (unidad compra / stock)</label>
                   <input class="input js-live-field" name="stock_actual" data-rule="required-number-when-finite" placeholder="Ej: 20">
                 </div>
               </div>
@@ -216,7 +235,7 @@
 
                     <div class="grid-2">
                       <div>
-                        <label class="label">Stock actual</label>
+                        <label class="label">Stock actual ({{ selected.unidad }})</label>
                         {% if is_inf %}
                           <input class="input input-num input-na js-detail-input js-stock-current" name="stock_actual" value="No aplica" disabled>
                         {% else %}
@@ -228,7 +247,7 @@
                         {% endif %}
                       </div>
                       <div>
-                        <label class="label">Stock de reserva</label>
+                        <label class="label">Stock de reserva ({{ selected.unidad }})</label>
                         {% if is_inf %}
                           <input class="input input-num input-na js-detail-input js-stock-min" name="stock_minimo" value="No aplica" data-real="{{ selected.stock_minimo }}" disabled>
                         {% else %}
@@ -236,17 +255,39 @@
                         {% endif %}
                       </div>
                     </div>
+                    {% if selected.fraccionable == "1" and not is_inf and selected_sale_stock is not none %}
+                      <div class="help detail-stock-help">Disponible para venta: {{ "%.2f"|format(selected_sale_stock) if (selected_sale_stock % 1) else "%.0f"|format(selected_sale_stock) }} {{ selected.unidad_venta }}</div>
+                    {% endif %}
 
                     <div class="grid-2">
                       <div>
-                        <label class="label">Unidad</label>
-                        <input class="input js-detail-input" name="unidad" value="{{ selected.unidad }}" disabled>
+                        <label class="label">Unidad compra / stock</label>
+                        <input class="input js-detail-input js-stock-unit-detail" name="unidad" value="{{ selected.unidad }}" disabled>
                       </div>
                       <div>
-                        <label class="label">Precio / unidad</label>
+                        <label class="label">Precio venta / unidad</label>
                         <input class="input input-num js-detail-input js-eur-input" name="precio_unitario" value="{{ selected.precio_unitario }}" disabled>
                       </div>
                     </div>
+
+                    <label class="inv-check">
+                      <input type="checkbox" class="js-detail-input js-fractionable-detail" name="fraccionable" {% if selected.fraccionable == "1" %}checked{% endif %} disabled>
+                      <span>Producto fraccionable</span>
+                    </label>
+
+                    <div class="grid-2">
+                      <div>
+                        <label class="label">Fracciones por unidad</label>
+                        <input class="input input-num js-detail-input js-fraction-count-detail" name="fracciones_por_unidad" value="{{ selected.fracciones_por_unidad }}" disabled>
+                      </div>
+                      <div>
+                        <label class="label">Unidad de venta</label>
+                        <input class="input js-detail-input js-sale-unit-detail" name="unidad_venta" value="{{ selected.unidad_venta }}" disabled>
+                      </div>
+                    </div>
+                    {% if selected.fraccionable == "1" %}
+                      <div class="help">Cada {{ selected.unidad }} equivale a {{ selected.fracciones_por_unidad }} {{ selected.unidad_venta }}.</div>
+                    {% endif %}
 
                     <input type="hidden" name="grupo_emoji" value="{{ selected.grupo_emoji }}">
 
@@ -287,6 +328,9 @@
                         Ultima compra: {{ "%.2f"|format(purchase_recommendation.ultima_compra) }} € / {{ purchase_recommendation.unidad }}
                         {% if purchase_recommendation.fecha %} · {{ purchase_recommendation.fecha }}{% endif %}
                       </div>
+                      {% if purchase_recommendation.referencia_compra %}
+                        <div class="help">{{ purchase_recommendation.referencia_compra }}</div>
+                      {% endif %}
                     </div>
                   {% else %}
                     <div class="detail-price-card detail-price-card-muted">
@@ -312,7 +356,7 @@
                           {% for m in selected_purchases %}
                             <tr>
                               <td>{{ (m.fecha or '')[:10] }}</td>
-                              <td class="right">{{ m.cantidad }}</td>
+                              <td class="right">{{ m.cantidad }} {{ selected.unidad }}</td>
                               <td>{{ m.nota }}</td>
                             </tr>
                           {% endfor %}
@@ -326,11 +370,6 @@
           </div>
         </div>
 
-        {% if g.is_admin %}
-        <div class="actions actions-end">
-          <button class="btn btn-primary btn-small" type="button" id="inventoryNewProductBtn" onclick="toggleNewProduct(true)">Nuevo producto</button>
-        </div>
-        {% endif %}
       </div>
     </section>
   </div>
@@ -346,14 +385,22 @@
       .toLowerCase();
   }
 
-  function toggleNewProduct(show) {
+  function toggleNewProduct(forceShow = null) {
     const box = document.getElementById("newProductMiddleBox");
     const detailBox = document.getElementById("productDetailBox");
     const detailTitle = document.getElementById("detailTitle");
+    const createBtn = document.getElementById("inventoryNewProductBtn");
+    const show = typeof forceShow === "boolean" ? forceShow : box.style.display === "none";
 
     box.style.display = show ? "block" : "none";
     detailBox.style.display = show ? "none" : "block";
     detailTitle.textContent = show ? "Crear producto" : "Detalle";
+    if (createBtn) {
+      createBtn.textContent = show ? "Volver al detalle" : "Nuevo producto";
+      createBtn.setAttribute("aria-expanded", show ? "true" : "false");
+      createBtn.classList.toggle("btn-primary", !show);
+      createBtn.classList.toggle("btn-secondary", show);
+    }
     if (show) {
       box.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -428,7 +475,9 @@
       if (isVisible) visible += 1;
     });
 
-    visibleProductsCount.textContent = String(visible);
+    if (visibleProductsCount) {
+      visibleProductsCount.textContent = String(visible);
+    }
     noResultsBox.hidden = visible !== 0;
   }
 
@@ -444,13 +493,15 @@
     applyFilters();
     syncFilterState();
   });
-  clearFiltersBtn.addEventListener("click", () => {
-    searchBox.value = "";
-    groupFilter.value = "";
-    onlyLow.checked = false;
-    applyFilters();
-    syncFilterState();
-  });
+  if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener("click", () => {
+      searchBox.value = "";
+      groupFilter.value = "";
+      onlyLow.checked = false;
+      applyFilters();
+      syncFilterState();
+    });
+  }
   document.addEventListener("keydown", (e) => {
     const tag = (document.activeElement && document.activeElement.tagName || "").toLowerCase();
     const typing = tag === "input" || tag === "textarea" || tag === "select";
@@ -480,6 +531,10 @@
   const newGroupFields = document.getElementById("newGroupFields");
   const stockInfinitoCheckbox = document.querySelector('#newProdForm input[name="stock_infinito"]');
   const stockActualInput = document.querySelector('#newProdForm input[name="stock_actual"]');
+  const stockUnitInput = document.querySelector('#newProdForm input[name="unidad"]');
+  const fractionableCheckbox = document.querySelector('#newProdForm input[name="fraccionable"]');
+  const fractionCountInput = document.querySelector('#newProdForm input[name="fracciones_por_unidad"]');
+  const saleUnitInput = document.querySelector('#newProdForm input[name="unidad_venta"]');
   const groupEmojiInput = document.getElementById("groupEmojiInput");
   const groupEmojiTrigger = document.getElementById("groupEmojiTrigger");
   const groupEmojiValue = document.getElementById("groupEmojiValue");
@@ -562,6 +617,34 @@
     refreshValidation();
   });
   syncStockActualUI();
+
+  function syncFractionalUI() {
+    const isFractional = !!fractionableCheckbox.checked;
+    fractionCountInput.disabled = !isFractional;
+    saleUnitInput.disabled = !isFractional;
+    if (isFractional) {
+      if (!(saleUnitInput.value || "").trim()) {
+        saleUnitInput.value = (stockUnitInput.value || "ud").trim() || "ud";
+      }
+      if (!(fractionCountInput.value || "").trim()) {
+        fractionCountInput.value = "1";
+      }
+    } else {
+      saleUnitInput.value = (stockUnitInput.value || "ud").trim() || "ud";
+      fractionCountInput.value = "1";
+    }
+  }
+
+  fractionableCheckbox.addEventListener("change", () => {
+    syncFractionalUI();
+    refreshValidation();
+  });
+  stockUnitInput.addEventListener("input", () => {
+    if (!fractionableCheckbox.checked) {
+      saleUnitInput.value = (stockUnitInput.value || "ud").trim() || "ud";
+    }
+  });
+  syncFractionalUI();
 
   function updateEmojiPickerUI() {
     const value = (groupEmojiInput && groupEmojiInput.value || "").trim();
@@ -647,6 +730,7 @@
     const val = (el.value || "").trim();
     const isNewGroup = grupoSelect.value === "__new__";
     const isInfinite = !!stockInfinitoCheckbox.checked;
+    const isFractional = !!fractionableCheckbox.checked;
 
     if (rule === "required") {
       if (val === "") return "field-pending";
@@ -666,11 +750,25 @@
       return "field-valid";
     }
 
+    if (rule === "required-when-fractionable") {
+      if (!isFractional) return "field-valid";
+      if (val === "") return "field-pending";
+      return "field-valid";
+    }
+
+    if (rule === "positive-number-when-fractionable") {
+      if (!isFractional) return "field-valid";
+      if (val === "") return "field-pending";
+      const n = parseNumber(val);
+      if (Number.isNaN(n) || n <= 0) return "field-invalid";
+      return "field-valid";
+    }
+
     if (rule === "required-number-when-finite") {
       if (isInfinite) return "field-valid";
       if (val === "") return "field-pending";
       const n = parseNumber(val);
-      if (Number.isNaN(n) || n < 0) return "field-invalid";
+      if (Number.isNaN(n)) return "field-invalid";
       return "field-valid";
     }
 
@@ -689,6 +787,7 @@
     el.addEventListener(ev, refreshValidation);
   });
   grupoSelect.addEventListener("change", refreshValidation);
+  fractionableCheckbox.addEventListener("change", refreshValidation);
   refreshValidation();
 
   newProdForm.addEventListener("submit", (e) => {
@@ -703,11 +802,23 @@
       return;
     }
 
-    ["precio_unitario", "stock_minimo", "stock_actual"].forEach((name) => {
+    ["precio_unitario", "stock_minimo", "stock_actual", "fracciones_por_unidad"].forEach((name) => {
       const input = newProdForm.querySelector(`[name="${name}"]`);
       if (input.disabled) return;
       input.value = input.value.trim().replace(",", ".");
     });
+    if (!fractionableCheckbox.checked) {
+      const saleUnit = newProdForm.querySelector('[name="unidad_venta"]');
+      if (saleUnit) {
+        saleUnit.disabled = false;
+        saleUnit.value = (newProdForm.querySelector('[name="unidad"]').value || "ud").trim() || "ud";
+      }
+      const fractionCount = newProdForm.querySelector('[name="fracciones_por_unidad"]');
+      if (fractionCount) {
+        fractionCount.disabled = false;
+        fractionCount.value = "1";
+      }
+    }
   });
 
   function normalizeEuroRaw(raw) {
@@ -753,6 +864,10 @@
     const stockInfDetail = detailForm.querySelector(".js-stock-inf-detail");
     const stockMinDetail = detailForm.querySelector(".js-stock-min");
     const stockCurrentDetail = detailForm.querySelector(".js-stock-current");
+    const stockUnitDetail = detailForm.querySelector(".js-stock-unit-detail");
+    const fractionableDetail = detailForm.querySelector(".js-fractionable-detail");
+    const fractionCountDetail = detailForm.querySelector(".js-fraction-count-detail");
+    const saleUnitDetail = detailForm.querySelector(".js-sale-unit-detail");
     const btnEditDetail = document.getElementById("btnEditDetail");
     const btnCancelDetail = document.getElementById("btnCancelDetail");
     const actionsView = document.getElementById("detailActionsView");
@@ -797,18 +912,51 @@
       }
     }
 
+    function syncDetailFractionalFields() {
+      if (!fractionableDetail || !fractionCountDetail || !saleUnitDetail || !stockUnitDetail) return;
+      const editing = editableFields.some((el) => !el.disabled);
+      const isFractional = !!fractionableDetail.checked;
+
+      if (isFractional) {
+        if ((saleUnitDetail.value || "").trim() === "") {
+          saleUnitDetail.value = (stockUnitDetail.value || "ud").trim() || "ud";
+        }
+        if ((fractionCountDetail.value || "").trim() === "") {
+          fractionCountDetail.value = "1";
+        }
+        fractionCountDetail.disabled = !editing;
+        saleUnitDetail.disabled = !editing;
+      } else {
+        saleUnitDetail.value = (stockUnitDetail.value || "ud").trim() || "ud";
+        fractionCountDetail.value = "1";
+        fractionCountDetail.disabled = true;
+        saleUnitDetail.disabled = true;
+      }
+    }
+
     function setDetailEditMode(isEditing) {
       editableFields.forEach((el) => {
         if (el === stockMinDetail) return;
+        if (el === fractionCountDetail || el === saleUnitDetail) return;
         el.disabled = !isEditing;
       });
       if (actionsView) actionsView.style.display = isEditing ? "none" : "";
       if (actionsEdit) actionsEdit.style.display = isEditing ? "" : "none";
       syncDetailReserveField();
+      syncDetailFractionalFields();
     }
 
     if (stockInfDetail) {
       stockInfDetail.addEventListener("change", syncDetailReserveField);
+    }
+    if (fractionableDetail) {
+      fractionableDetail.addEventListener("change", syncDetailFractionalFields);
+    }
+    if (stockUnitDetail) {
+      stockUnitDetail.addEventListener("input", () => {
+        if (!fractionableDetail || fractionableDetail.checked) return;
+        saleUnitDetail.value = (stockUnitDetail.value || "ud").trim() || "ud";
+      });
     }
     if (btnEditDetail) {
       btnEditDetail.addEventListener("click", () => setDetailEditMode(true));
@@ -842,6 +990,12 @@
         }
         if (el.classList.contains("js-eur-input")) {
           el.value = normalizeEuroRaw(el.value);
+        }
+        if (el.classList.contains("js-fraction-count-detail")) {
+          el.value = (el.value || "").trim().replace(",", ".") || "1";
+        }
+        if (el.classList.contains("js-sale-unit-detail") && (!fractionableDetail || !fractionableDetail.checked)) {
+          el.value = (stockUnitDetail.value || "ud").trim() || "ud";
         }
         el.disabled = false;
       });

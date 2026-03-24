@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel analysis-selector-panel">
+  <div class="analysis-selector-grid">
+    {% for item in analysis_views %}
+    <a class="analysis-choice{% if item.active %} analysis-choice-active{% endif %}" href="{{ item.href }}">
+      <strong>{{ item.label }}</strong>
+      <span>{{ item.description }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if analysis_view == "detalle" %}
+<section class="panel analysis-filter-panel">
+  <div class="section-head compact-head">
+    <div>
+      <p class="section-subtitle">
+        El rango es inclusivo en ambas fechas. Por defecto se usa desde el 1 de enero del año actual hasta hoy.
+      </p>
+    </div>
+  </div>
+
+  <form method="get" class="form analysis-filter-bar-form" id="analysisDetailFiltersForm">
+    <input type="hidden" name="view" value="detalle">
+    <div class="analysis-filter-toolbar">
+      <div class="analysis-filter-field">
+        <label class="label" for="analysisDetailFrom">Desde</label>
+        <input class="input" id="analysisDetailFrom" type="date" name="from" value="{{ detail_filters.from }}" required>
+      </div>
+      <div class="analysis-filter-field">
+        <label class="label" for="analysisDetailTo">Hasta</label>
+        <input class="input" id="analysisDetailTo" type="date" name="to" value="{{ detail_filters.to }}" required>
+      </div>
+      <div class="analysis-filter-field analysis-filter-field-wide">
+        <label class="label">Tipo</label>
+        <div class="analysis-type-checklist">
+          {% for option in detail_type_options %}
+          <label class="analysis-type-check">
+            <input type="checkbox" name="tipo" value="{{ option.value }}" {% if option.value in detail_filters.tipos %}checked{% endif %}>
+            <span>{{ option.label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="actions analysis-filter-actions">
+        <a class="btn btn-secondary" href="{{ detail_export_href }}">Descargar Excel</a>
+        <a class="btn btn-secondary" href="{{ url_for('analisis', view='detalle') }}">Restablecer</a>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="analysis-detail-summary-grid">
+  <article class="panel analysis-detail-summary-card">
+    <span>Saldo inicial</span>
+    <strong>{{ "%.2f"|format(detail_summary.opening_balance) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Entradas</span>
+    <strong class="analysis-money-positive">+{{ "%.2f"|format(detail_summary.income_total) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Salidas</span>
+    <strong class="analysis-money-negative">-{{ "%.2f"|format(detail_summary.expense_total) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Balance neto</span>
+    <strong class="{% if detail_summary.net_total >= 0 %}analysis-money-positive{% else %}analysis-money-negative{% endif %}">
+      {% if detail_summary.net_total >= 0 %}+{% endif %}{{ "%.2f"|format(detail_summary.net_total) }} €
+    </strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Saldo final</span>
+    <strong>{{ "%.2f"|format(detail_summary.closing_balance) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Movimientos</span>
+    <strong>{{ detail_summary.count }}</strong>
+  </article>
+</section>
+
+<section class="panel table-card">
+  <div class="section-head compact-head">
+    <div>
+      <h2 class="section-heading">Vista previa</h2>
+      <p class="section-subtitle">
+        {% if detail_rows_total %}
+        {{ detail_rows_total }} movimientos con el filtro actual.
+        {% else %}
+        No hay movimientos de caja para el rango seleccionado.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if not detail_rows %}
+  <div class="empty">No hay filas que mostrar para estas fechas.</div>
+  {% else %}
+  <div class="inv-scrollbox analysis-detail-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Tipo</th>
+          <th>Descripcion</th>
+          <th class="right">Importe</th>
+          <th class="right">Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in detail_rows %}
+        <tr>
+          <td>{{ row.fecha }}</td>
+          <td class="analysis-type-cell">{{ row.tipo|capitalize }}</td>
+          <td>{{ row.descripcion or "-" }}</td>
+          <td class="right {% if row.importe.startswith('-') %}analysis-money-negative{% else %}analysis-money-positive{% endif %}">
+            {% if not row.importe.startswith('-') %}+{% endif %}{{ row.importe }} €
+          </td>
+          <td class="right">{{ row.saldo }} €</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="analysis-total-row">
+          <td colspan="3"><strong>Total filtrado</strong></td>
+          <td class="right {% if detail_table_total < 0 %}analysis-money-negative{% else %}analysis-money-positive{% endif %}">
+            {% if detail_table_total >= 0 %}+{% endif %}{{ "%.2f"|format(detail_table_total) }} €
+          </td>
+          <td class="right">-</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% if detail_preview_limited %}
+  <div class="help analysis-preview-note">
+    La vista previa muestra las primeras 200 filas. El total y el Excel incluyen todas las filas filtradas.
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+{% else %}
+<section class="panel analysis-filter-panel">
+  <form method="get" class="form analysis-filter-bar-form" id="analysisAnnualFiltersForm">
+    <input type="hidden" name="view" value="resumen-anual">
+    <div class="analysis-filter-toolbar">
+      <div class="analysis-filter-field analysis-annual-filter-field">
+        <label class="label" for="analysisAnnualYear">Año</label>
+        <select class="input" id="analysisAnnualYear" name="year">
+          {% for year in annual_year_options %}
+          <option value="{{ year }}" {% if year == annual_filters.year %}selected{% endif %}>{{ year }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="actions analysis-filter-actions">
+        <a class="btn btn-secondary" href="{{ annual_pdf_href }}">Descargar PDF</a>
+        <a class="btn btn-secondary" href="{{ url_for('analisis', view='resumen-anual') }}">Restablecer</a>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="analysis-detail-summary-grid">
+  <article class="panel analysis-detail-summary-card">
+    <span>Saldo inicial</span>
+    <strong>{{ "%.2f"|format(annual_summary.opening_balance) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Saldo final</span>
+    <strong>{{ "%.2f"|format(annual_summary.closing_balance) }} €</strong>
+  </article>
+  <article class="panel analysis-detail-summary-card">
+    <span>Balance saldo de caja</span>
+    <strong class="{% if annual_summary.net_balance >= 0 %}analysis-money-positive{% else %}analysis-money-negative{% endif %}">
+      {% if annual_summary.net_balance >= 0 %}+{% endif %}{{ "%.2f"|format(annual_summary.net_balance) }} €
+    </strong>
+  </article>
+</section>
+
+<section class="panel table-card">
+  <div class="section-head compact-head">
+    <div>
+      <h2 class="section-heading">Resumen mensual</h2>
+      <p class="section-subtitle">{{ annual_summary.rows|length }} meses en el año {{ annual_filters.year }}.</p>
+    </div>
+  </div>
+
+  <div class="inv-scrollbox analysis-detail-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Mes</th>
+          <th class="right">Total ingresos</th>
+          <th class="right">Total gastos</th>
+          <th class="right">Saldo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in annual_summary.rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="right analysis-money-positive">+{{ "%.2f"|format(row.income_total) }} €</td>
+          <td class="right analysis-money-negative">-{{ "%.2f"|format(row.expense_total) }} €</td>
+          <td class="right {% if row.saldo >= 0 %}analysis-money-positive{% else %}analysis-money-negative{% endif %}">
+            {% if row.saldo >= 0 %}+{% endif %}{{ "%.2f"|format(row.saldo) }} €
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<script>
+  function bindAnalysisAutoSubmit(formId, allowedNames) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+
+    form.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+      if (!allowedNames.includes(target.name)) return;
+      if (!form.reportValidity()) return;
+      form.requestSubmit();
+    });
+  }
+
+  bindAnalysisAutoSubmit("analysisDetailFiltersForm", ["from", "to", "tipo"]);
+  bindAnalysisAutoSubmit("analysisAnnualFiltersForm", ["year"]);
+</script>
+{% endblock %}

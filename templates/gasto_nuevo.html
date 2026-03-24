@@ -1,11 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro page-header-bar">
-  <div class="page-header-main">
-    <h1 class="page-title page-title-left">Nuevo gasto libre</h1>
-    <a class="btn btn-secondary btn-small" href="{{ url_for('historial_gastos_libres') }}">Historial</a>
-  </div>
-</section>
 
 <section class="panel">
   <div class="section-head compact-head">
@@ -15,30 +9,31 @@
     </div>
   </div>
 
-  <form method="post" action="{{ url_for('nuevo_gasto_libre_post') }}" class="form">
-    <div class="grid-2">
+  <form method="post" action="{{ url_for('nuevo_gasto_libre_post') }}" class="form" id="freeExpenseForm">
+    <div class="grid-2 free-expense-top-row">
       <div>
-        <label class="label">Fecha</label>
-        <input class="input" type="date" name="fecha_gasto" value="{{ today_iso }}" required>
+        <label class="label" for="freeExpenseDate">Fecha</label>
+        <input id="freeExpenseDate" class="input" type="date" name="fecha_gasto" value="{{ today_iso }}" required>
       </div>
       <div>
-        <label class="label">Categoria</label>
-        <select name="categoria" required>
+        <label class="label" for="freeExpenseCategory">Categoria</label>
+        <select id="freeExpenseCategory" name="categoria" required>
           {% for category in categories %}
-          <option value="{{ category }}">{{ category }}</option>
+          <option value="{{ category.value }}">{{ category.label }}</option>
           {% endfor %}
         </select>
       </div>
     </div>
 
-    <div class="grid-2">
+    <div>
+      <label class="label" for="freeExpenseDescription">Descripcion</label>
+      <input id="freeExpenseDescription" class="input" name="descripcion" placeholder="Ej: Productos de limpieza del local" required>
+    </div>
+
+    <div class="free-expense-amount-row">
       <div>
-        <label class="label">Importe</label>
-        <input class="input input-num" name="importe" placeholder="0.00" required>
-      </div>
-      <div>
-        <label class="label">Descripcion</label>
-        <input class="input" name="descripcion" placeholder="Ej: Productos de limpieza del local" required>
+        <label class="label" for="freeExpenseAmount">Importe</label>
+        <input id="freeExpenseAmount" class="input input-num" name="importe" placeholder="0.00" required>
       </div>
     </div>
 
@@ -47,4 +42,163 @@
     </div>
   </form>
 </section>
+
+<dialog class="shopping-dialog free-expense-confirm-dialog" id="freeExpenseConfirmDialog">
+  <div class="shopping-dialog-shell">
+    <div class="shopping-dialog-header">
+      <div>
+        <h2 class="section-heading">Confirmar gasto</h2>
+        <p class="section-subtitle">Revisa los datos antes de registrar el gasto libre.</p>
+      </div>
+    </div>
+
+    <div class="invoice-confirm-meta">
+      <span><strong>Fecha:</strong> <span id="freeExpenseConfirmDate">-</span></span>
+      <span><strong>Categoria:</strong> <span id="freeExpenseConfirmCategory">-</span></span>
+      <span><strong>Importe:</strong> <span id="freeExpenseConfirmAmount">0.00 €</span></span>
+    </div>
+
+    <div class="shopping-dialog-list free-expense-confirm-list" id="freeExpenseConfirmList"></div>
+
+    <div class="shopping-dialog-actions">
+      <button class="btn btn-secondary" type="button" id="closeFreeExpenseConfirmDialog">Cancelar</button>
+      <button class="btn btn-primary" type="button" id="confirmFreeExpenseSubmit">Registrar gasto</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  function parseNumber(raw) {
+    let t = (raw || "").trim().replace(/\s/g, "");
+    if (!t) return null;
+    if (t.includes(",") && t.includes(".")) {
+      if (t.lastIndexOf(",") > t.lastIndexOf(".")) {
+        t = t.replace(/\./g, "").replace(",", ".");
+      } else {
+        t = t.replace(/,/g, "");
+      }
+    } else {
+      t = t.replace(",", ".");
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function formatMoney(value) {
+    return `${value.toFixed(2)} €`;
+  }
+
+  const freeExpenseForm = document.getElementById("freeExpenseForm");
+  const freeExpenseConfirmDialog = document.getElementById("freeExpenseConfirmDialog");
+  const closeFreeExpenseConfirmDialog = document.getElementById("closeFreeExpenseConfirmDialog");
+  const confirmFreeExpenseSubmit = document.getElementById("confirmFreeExpenseSubmit");
+  const freeExpenseConfirmDate = document.getElementById("freeExpenseConfirmDate");
+  const freeExpenseConfirmCategory = document.getElementById("freeExpenseConfirmCategory");
+  const freeExpenseConfirmAmount = document.getElementById("freeExpenseConfirmAmount");
+  const freeExpenseConfirmList = document.getElementById("freeExpenseConfirmList");
+  const toastKey = "buen-yantar:toast";
+  let freeExpenseSubmitting = false;
+
+  function buildFreeExpenseConfirm() {
+    const dateValue = freeExpenseForm.querySelector('[name="fecha_gasto"]').value || "-";
+    const categorySelect = freeExpenseForm.querySelector('[name="categoria"]');
+    const categoryLabel = categorySelect.options[categorySelect.selectedIndex]?.textContent?.trim() || "-";
+    const descriptionValue = (freeExpenseForm.querySelector('[name="descripcion"]').value || "").trim();
+    const amountValue = parseNumber(freeExpenseForm.querySelector('[name="importe"]').value);
+
+    freeExpenseConfirmDate.textContent = dateValue;
+    freeExpenseConfirmCategory.textContent = categoryLabel;
+    freeExpenseConfirmAmount.textContent = amountValue !== null && !Number.isNaN(amountValue) ? formatMoney(amountValue) : "0.00 €";
+
+    freeExpenseConfirmList.replaceChildren();
+    const card = document.createElement("div");
+    card.className = "invoice-confirm-item";
+
+    const title = document.createElement("strong");
+    title.textContent = descriptionValue || "Sin descripcion";
+
+    const meta = document.createElement("div");
+    meta.className = "invoice-confirm-item-meta";
+    meta.textContent = `Se descontara ${freeExpenseConfirmAmount.textContent} del saldo de caja.`;
+
+    card.append(title, meta);
+    freeExpenseConfirmList.appendChild(card);
+  }
+
+  async function submitFreeExpenseConfirmed() {
+    if (!confirmFreeExpenseSubmit) return;
+
+    confirmFreeExpenseSubmit.disabled = true;
+    const originalText = confirmFreeExpenseSubmit.textContent;
+    confirmFreeExpenseSubmit.textContent = "Registrando...";
+
+    try {
+      const formData = new FormData(freeExpenseForm);
+      const response = await fetch(freeExpenseForm.action, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudo registrar el gasto libre.");
+      }
+
+      freeExpenseSubmitting = true;
+      sessionStorage.setItem(toastKey, JSON.stringify({
+        message: `Nuevo gasto registrado: ${payload.total} € · Ref ${payload.expense_id}`,
+        tone: "success",
+        detail: "",
+      }));
+      window.location.href = payload.redirect_url || "{{ url_for('home') }}";
+    } catch (error) {
+      window.alert(error.message || "No se pudo registrar el gasto libre.");
+    } finally {
+      confirmFreeExpenseSubmit.disabled = false;
+      confirmFreeExpenseSubmit.textContent = originalText;
+    }
+  }
+
+  if (closeFreeExpenseConfirmDialog && freeExpenseConfirmDialog) {
+    closeFreeExpenseConfirmDialog.addEventListener("click", () => freeExpenseConfirmDialog.close());
+    freeExpenseConfirmDialog.addEventListener("click", (event) => {
+      if (event.target === freeExpenseConfirmDialog) {
+        freeExpenseConfirmDialog.close();
+      }
+    });
+  }
+
+  if (confirmFreeExpenseSubmit) {
+    confirmFreeExpenseSubmit.addEventListener("click", submitFreeExpenseConfirmed);
+  }
+
+  window.addEventListener("beforeunload", (e) => {
+    if (freeExpenseSubmitting) return;
+    const description = (freeExpenseForm.querySelector('[name="descripcion"]').value || "").trim();
+    const amount = (freeExpenseForm.querySelector('[name="importe"]').value || "").trim();
+    if (!description && !amount) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
+  freeExpenseForm.addEventListener("submit", (e) => {
+    const description = (freeExpenseForm.querySelector('[name="descripcion"]').value || "").trim();
+    const amount = parseNumber(freeExpenseForm.querySelector('[name="importe"]').value);
+    if (!description) {
+      e.preventDefault();
+      window.alert("La descripción es obligatoria.");
+      return;
+    }
+    if (amount === null || Number.isNaN(amount) || amount <= 0) {
+      e.preventDefault();
+      window.alert("El importe debe ser mayor que 0.");
+      return;
+    }
+    e.preventDefault();
+    buildFreeExpenseConfirm();
+    freeExpenseConfirmDialog.showModal();
+  });
+</script>
 {% endblock %}

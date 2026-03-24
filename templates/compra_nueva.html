@@ -1,19 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro page-header-bar">
-  <div class="page-header-main">
-    <h1 class="page-title page-title-left">Nueva compra</h1>
-    <a class="btn btn-secondary btn-small" href="{{ url_for('historial_compras') }}">Historial</a>
-  </div>
-</section>
 
 <div class="purchase-layout">
   <section class="panel purchase-left">
-    <div class="section-head compact-head">
-      <h2 class="section-heading">Productos</h2>
-      <span class="header-count" id="purchaseVisibleCount">{{ products|length }}</span>
-    </div>
-
     <div class="inv-filters">
       <div>
         <label class="label" for="purchaseSearch">Buscar</label>
@@ -30,10 +19,6 @@
       </div>
     </div>
 
-    <div class="toolbar-inline actions-end">
-      <button class="btn btn-secondary btn-small" type="button" id="purchaseClearFilters">Limpiar filtros</button>
-    </div>
-
     <div class="inv-scrollbox purchase-products-box">
       <table class="table">
         <thead>
@@ -45,29 +30,28 @@
         <tbody id="productsPickTbody">
           {% for p in products %}
             <tr
-              class="row-click purchase-product-row{% if p.stock_infinito == '1' %} purchase-product-row-disabled{% endif %}"
+              class="row-click purchase-product-row"
               data-product-id="{{ p.producto_id }}"
               data-name="{{ p.nombre }}"
               data-group="{{ p.grupo }}"
-              data-unit="{{ p.unidad }}"
+              data-stock-unit="{{ p.unidad_stock }}"
+              data-sale-unit="{{ p.unidad_venta }}"
               data-emoji="{{ p.grupo_emoji }}"
               data-sale-price="{{ p.precio_venta_actual }}"
               data-inf="{{ p.stock_infinito }}"
-              {% if p.stock_infinito == "1" %}
-                tabindex="-1"
-                aria-disabled="true"
-                aria-label="{{ p.nombre }} no seleccionable por stock infinito"
-              {% else %}
-                tabindex="0"
-                role="button"
-                aria-label="Anadir {{ p.nombre }} al ticket"
-              {% endif %}
+              data-fraccionable="{{ p.fraccionable }}"
+              data-fractions="{{ p.fracciones_por_unidad }}"
+              tabindex="0"
+              role="button"
+              aria-label="Anadir {{ p.nombre }} al ticket"
             >
               <td>
                 <div class="product-row-head">
                   <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
                   {% if p.stock_infinito == "1" %}
                     <span class="product-state state-inf">INF</span>
+                  {% elif p.stock_negative == "1" %}
+                    <span class="product-state state-negative">NEG</span>
                   {% elif p.stock_zero == "1" %}
                     <span class="product-state state-zero">0</span>
                   {% elif p.stock_bajo == "1" %}
@@ -76,17 +60,17 @@
                     <span class="product-state state-ok">OK</span>
                   {% endif %}
                 </div>
-                <div class="product-row-meta">{{ p.grupo_emoji }} {{ p.grupo }} · {{ p.unidad }}</div>
+                {% if p.fraccionable == "1" %}
+                  <div class="help product-subtext">Compra en {{ p.unidad_stock }} · Venta en {{ p.unidad_venta }} · {{ p.fraccion_info }}</div>
+                {% endif %}
               </td>
               <td class="right">
                 {% if p.stock_infinito == "1" %}
                   ♾️
                 {% else %}
-                  {% set cur = (p.stock_actual or 0) %}
-                  {% if (cur % 1) == 0 %}
-                    {{ "%.0f"|format(cur) }} {{ p.unidad }}
-                  {% else %}
-                    {{ "%.2f"|format(cur) }} {{ p.unidad }}
+                  <div class="stock-display-main">{{ p.stock_display_main }}</div>
+                  {% if p.stock_display_meta %}
+                    <div class="stock-display-meta">{{ p.stock_display_meta }}</div>
                   {% endif %}
                 {% endif %}
               </td>
@@ -99,61 +83,43 @@
   </section>
 
   <section class="panel purchase-right">
-    <div class="section-head compact-head">
-      <h2 class="section-heading">Compra</h2>
-    </div>
-
     <form method="post" action="{{ url_for('nueva_compra_post') }}" id="purchaseForm" class="form">
       <input type="hidden" name="f_q" id="purchaseFQ" value="{{ current_filters.q }}">
       <input type="hidden" name="f_g" id="purchaseFG" value="{{ current_filters.g }}">
-      <div class="grid-2">
-        <div>
-          <label class="label">Fecha compra</label>
-          <input class="input" type="date" name="fecha_compra" value="{{ today_iso }}" required>
-        </div>
-        <div>
-          <label class="label">Proveedor</label>
-          <input class="input" name="proveedor" placeholder="Ej: Distribuciones Norte">
-        </div>
-      </div>
-
-      <div>
-        <label class="label">Nota global</label>
-        <input class="input" name="nota_global" placeholder="Observacion general de la compra">
-      </div>
-
-      <div class="toolbar-inline actions-end ticket-toolbar">
-        <span class="draft-status" id="purchaseDraftStatus" data-state="empty">Borrador vacio</span>
-        <button class="btn btn-secondary btn-small" type="button" id="purchaseClearLines">Vaciar ticket</button>
+      <div class="purchase-inline-fields">
+        <label class="label" for="purchaseDate">Fecha</label>
+        <input id="purchaseDate" class="input" type="date" name="fecha_compra" value="{{ today_iso }}" required>
+        <label class="label" for="purchaseNote">Nota</label>
+        <input id="purchaseNote" class="input" name="nota_global" placeholder="Observacion general de la compra">
       </div>
 
       <div class="inv-scrollbox purchase-lines-box">
-        <table class="table purchase-table">
+        <table class="table purchase-table purchase-lines-table">
           <thead>
             <tr>
-              <th>Producto</th>
-              <th class="right">Cantidad</th>
-              <th class="right">Precio compra</th>
-              <th class="right">Venta actual</th>
-              <th class="right">Venta recomendada</th>
-              <th>Nota linea</th>
+              <th>PRODUCTO</th>
+              <th class="purchase-head-center">CANTIDAD</th>
+              <th class="purchase-head-center">P. UD</th>
+              <th class="purchase-head-center">P. TOTAL</th>
+              <th class="purchase-head-center">P. VENTA ACTUAL</th>
+              <th class="purchase-head-center">P. VENTA RECOMENDADO</th>
+              <th>NOTA</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="purchaseLines">
             <tr id="purchaseEmpty">
-              <td colspan="7" class="empty">Selecciona productos desde la columna izquierda.</td>
+              <td colspan="8" class="empty">Selecciona productos desde la columna izquierda.</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
-        Total: <strong id="sumAmount">0.00 €</strong>
-      </div>
-
-      <div class="actions">
+      <div class="invoice-submit-row">
         <button class="btn btn-primary" type="submit">Registrar compra</button>
+        <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
+          Total: <strong id="sumAmount">0.00 €</strong>
+        </div>
       </div>
     </form>
   </section>
@@ -161,31 +127,73 @@
 
 <template id="ticketRowTpl">
   <tr class="purchase-row">
-    <td>
+    <td class="purchase-col-product">
       <input type="hidden" name="producto_id[]" class="ticket-product-id">
       <div class="ticket-product-name"></div>
-      <div class="help ticket-product-meta"></div>
+      <div class="ticket-product-meta"></div>
     </td>
-    <td class="right">
+    <td class="right purchase-col-qty">
       <input class="input input-num js-purchase-field" name="cantidad[]" data-rule="positive-number" placeholder="0">
     </td>
-    <td class="right">
+    <td class="right purchase-col-unit">
       <input class="input input-num js-purchase-field" name="precio_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
+      <div class="purchase-price-passive" hidden aria-hidden="true">-</div>
     </td>
-    <td class="right">
-      <div class="purchase-price-hint purchase-sale-current">-</div>
+    <td class="right purchase-col-total">
+      <input class="input input-num js-purchase-field" name="subtotal_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
     </td>
-    <td class="right">
+    <td class="right purchase-col-current">
+      <input class="input input-num js-purchase-field" name="precio_venta_actual[]" data-rule="non-negative-number" placeholder="0.00">
+    </td>
+    <td class="right purchase-col-recommended">
       <div class="purchase-price-hint purchase-sale-recommended">-</div>
     </td>
-    <td>
+    <td class="purchase-col-note">
       <input class="input" name="nota_linea[]" placeholder="Opcional">
     </td>
-    <td>
-      <button type="button" class="btn btn-secondary purchase-remove">Eliminar</button>
+    <td class="purchase-col-remove">
+      <button type="button" class="btn btn-secondary purchase-remove" aria-label="Eliminar linea">X</button>
     </td>
   </tr>
 </template>
+
+<dialog class="shopping-dialog purchase-confirm-dialog" id="purchaseConfirmDialog">
+  <div class="shopping-dialog-shell">
+    <div class="shopping-dialog-header">
+      <div>
+        <h2 class="section-heading">Confirmar compra</h2>
+        <p class="section-subtitle">Revisa las líneas y los cambios de precio antes de registrar la compra.</p>
+      </div>
+    </div>
+
+    <div class="invoice-confirm-meta">
+      <span><strong>Fecha:</strong> <span id="purchaseConfirmDate">-</span></span>
+      <span><strong>Nota:</strong> <span id="purchaseConfirmNote">-</span></span>
+      <span><strong>Total:</strong> <span id="purchaseConfirmTotal">0.00 €</span></span>
+    </div>
+
+    <div class="shopping-dialog-body purchase-confirm-body">
+      <section class="shopping-dialog-panel">
+        <div class="shopping-dialog-panel-head">
+          <strong>Resumen de la compra</strong>
+        </div>
+        <div class="shopping-dialog-list purchase-confirm-list" id="purchaseConfirmList"></div>
+      </section>
+
+      <section class="shopping-dialog-panel">
+        <div class="shopping-dialog-panel-head">
+          <strong>Actualizaciones de precio de venta</strong>
+        </div>
+        <div class="shopping-dialog-list purchase-warning-list" id="purchaseWarningList"></div>
+      </section>
+    </div>
+
+    <div class="shopping-dialog-actions">
+      <button class="btn btn-secondary" type="button" id="closePurchaseConfirmDialog">Cancelar</button>
+      <button class="btn btn-primary" type="button" id="confirmPurchaseSubmit">Registrar compra</button>
+    </div>
+  </div>
+</dialog>
 
 <script>
   function normalizeText(s) {
@@ -234,6 +242,12 @@
       if (Number.isNaN(n) || n < 0) return "field-invalid";
       return "field-valid";
     }
+    if (rule === "non-negative-number") {
+      if (!val) return "field-pending";
+      const n = parseNumber(val);
+      if (Number.isNaN(n) || n < 0) return "field-invalid";
+      return "field-valid";
+    }
     return "field-valid";
   }
 
@@ -252,8 +266,17 @@
   const hiddenFQ = document.getElementById("purchaseFQ");
   const hiddenFG = document.getElementById("purchaseFG");
   const sumAmount = document.getElementById("sumAmount");
+  const purchaseConfirmDialog = document.getElementById("purchaseConfirmDialog");
+  const closePurchaseConfirmDialog = document.getElementById("closePurchaseConfirmDialog");
+  const confirmPurchaseSubmit = document.getElementById("confirmPurchaseSubmit");
+  const purchaseConfirmList = document.getElementById("purchaseConfirmList");
+  const purchaseWarningList = document.getElementById("purchaseWarningList");
+  const purchaseConfirmDate = document.getElementById("purchaseConfirmDate");
+  const purchaseConfirmNote = document.getElementById("purchaseConfirmNote");
+  const purchaseConfirmTotal = document.getElementById("purchaseConfirmTotal");
   const selectedById = new Map();
   const draftKey = "buen-yantar:purchase-draft:v1";
+  const toastKey = "buen-yantar:toast";
   let purchaseSubmitting = false;
 
   function productDataFromRow(sourceRow) {
@@ -262,7 +285,10 @@
       name: sourceRow.dataset.name || "",
       emoji: sourceRow.dataset.emoji || "📦",
       group: sourceRow.dataset.group || "Otros",
-      unit: sourceRow.dataset.unit || "ud",
+      stockUnit: sourceRow.dataset.stockUnit || "ud",
+      saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
+      fractional: sourceRow.dataset.fraccionable === "1",
+      fractions: sourceRow.dataset.fractions || "1",
       salePrice: sourceRow.dataset.salePrice || "",
     };
   }
@@ -271,12 +297,40 @@
     return `${value.toFixed(2)} €`;
   }
 
+  function getPurchasePricing({ qty, unitPrice, subtotal, fractional, fractions }) {
+    const qtyValue = parseNumber(qty);
+    const unitPriceValue = parseNumber(unitPrice);
+    const subtotalValue = parseNumber(subtotal);
+    const fractionsValue = parseNumber(fractions || "1");
+    const isFractional = fractional === true || fractional === "1";
+    const hasQty = qtyValue !== null && !Number.isNaN(qtyValue) && qtyValue > 0;
+    const hasUnitPrice = unitPriceValue !== null && !Number.isNaN(unitPriceValue) && unitPriceValue >= 0;
+    const hasSubtotal = subtotalValue !== null && !Number.isNaN(subtotalValue) && subtotalValue >= 0;
+    const hasFractions = fractionsValue !== null && !Number.isNaN(fractionsValue) && fractionsValue > 0;
+
+    const lineTotal = isFractional
+      ? (hasSubtotal ? subtotalValue : null)
+      : (hasQty && hasUnitPrice ? qtyValue * unitPriceValue : null);
+    const unitPurchasePrice = isFractional
+      ? (hasSubtotal && hasQty ? subtotalValue / qtyValue : null)
+      : (hasUnitPrice ? unitPriceValue : null);
+    const saleUnitBasePrice = unitPurchasePrice !== null && (!isFractional || hasFractions)
+      ? (isFractional ? unitPurchasePrice / fractionsValue : unitPurchasePrice)
+      : null;
+
+    return {
+      isFractional,
+      lineTotal,
+      unitPurchasePrice,
+      recommendedSalePrice: saleUnitBasePrice !== null ? saleUnitBasePrice * 1.2 : null,
+    };
+  }
+
   function hasDraftContent() {
     return (
       selectedById.size > 0
       || (searchBox.value || "").trim() !== ""
       || (groupFilter.value || "").trim() !== ""
-      || (purchaseForm.querySelector('[name="proveedor"]').value || "").trim() !== ""
       || (purchaseForm.querySelector('[name="nota_global"]').value || "").trim() !== ""
     );
   }
@@ -295,13 +349,14 @@
       },
       fields: {
         fecha_compra: purchaseForm.querySelector('[name="fecha_compra"]').value || "",
-        proveedor: purchaseForm.querySelector('[name="proveedor"]').value || "",
         nota_global: purchaseForm.querySelector('[name="nota_global"]').value || "",
       },
       lines: Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => ({
         producto_id: row.querySelector(".ticket-product-id").value,
         cantidad: row.querySelector('input[name="cantidad[]"]').value || "",
         precio_compra: row.querySelector('input[name="precio_compra[]"]').value || "",
+        subtotal_compra: row.querySelector('input[name="subtotal_compra[]"]').value || "",
+        precio_venta_actual: row.querySelector('input[name="precio_venta_actual[]"]').value || "",
         nota_linea: row.querySelector('input[name="nota_linea[]"]').value || "",
       })),
     };
@@ -322,24 +377,70 @@
     updateDraftStatus("empty", "Borrador vacio");
   }
 
+  function syncLinePricing(row) {
+    const qtyInput = row.querySelector('input[name="cantidad[]"]');
+    const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
+    const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+    const pricing = getPurchasePricing({
+      qty: qtyInput.value,
+      unitPrice: unitPriceInput.value,
+      subtotal: subtotalInput.value,
+      fractional: row.dataset.fractional,
+      fractions: row.dataset.fractions,
+    });
+
+    if (row.dataset.fractional !== "1") {
+      subtotalInput.value = pricing.lineTotal !== null ? pricing.lineTotal.toFixed(2) : "";
+      setFieldState(subtotalInput, validateField(subtotalInput));
+    }
+
+    updateSaleRecommendation(row);
+    refreshSummary();
+  }
+
+  function configurePurchaseRow(row) {
+    const isFractional = row.dataset.fractional === "1";
+    const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
+    const unitPricePassive = row.querySelector(".purchase-price-passive");
+    const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+
+    unitPriceInput.hidden = isFractional;
+    unitPricePassive.hidden = !isFractional;
+    unitPricePassive.setAttribute("aria-hidden", isFractional ? "false" : "true");
+    unitPriceInput.dataset.rule = "non-negative-number-or-empty";
+
+    subtotalInput.readOnly = !isFractional;
+    subtotalInput.classList.toggle("input-readonly", !isFractional);
+    subtotalInput.dataset.rule = "non-negative-number-or-empty";
+    subtotalInput.placeholder = isFractional ? "0.00" : "Auto";
+
+    if (isFractional) {
+      unitPriceInput.value = "";
+      setFieldState(unitPriceInput, "field-valid");
+    }
+  }
+
   function appendPurchaseRow(data, options = {}) {
     const row = rowTpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ticket-product-id").value = data.pid;
     row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
-    row.querySelector(".ticket-product-meta").textContent = `${data.emoji} ${data.group} · ${data.unit}`;
-    row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "";
+    row.querySelector(".ticket-product-meta").textContent = `Compra en ${data.stockUnit}`;
+    row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "1";
     row.querySelector('input[name="precio_compra[]"]').value = data.price ?? "";
+    row.querySelector('input[name="subtotal_compra[]"]').value = data.subtotal ?? "";
+    row.querySelector('input[name="precio_venta_actual[]"]').value = data.salePrice ?? "";
     row.querySelector('input[name="nota_linea[]"]').value = data.note ?? "";
-    row.dataset.salePrice = data.salePrice ?? "";
-
-    const currentSale = parseNumber(data.salePrice ?? "");
-    row.querySelector(".purchase-sale-current").textContent = (currentSale !== null && !Number.isNaN(currentSale))
-      ? formatMoney(currentSale)
-      : "-";
+    row.dataset.originalSalePrice = data.originalSalePrice ?? data.salePrice ?? "";
+    row.dataset.stockUnit = data.stockUnit || "ud";
+    row.dataset.saleUnit = data.saleUnit || data.stockUnit || "ud";
+    row.dataset.fractional = data.fractional ? "1" : "0";
+    row.dataset.fractions = data.fractions || "1";
 
     purchaseLines.appendChild(row);
     selectedById.set(data.pid, row);
+    configurePurchaseRow(row);
     attachTicketEvents(row);
+    syncLinePricing(row);
     refreshEmptyState();
     refreshSummary();
 
@@ -364,18 +465,21 @@
       }
       if (draft.fields) {
         purchaseForm.querySelector('[name="fecha_compra"]').value = draft.fields.fecha_compra || purchaseForm.querySelector('[name="fecha_compra"]').value;
-        purchaseForm.querySelector('[name="proveedor"]').value = draft.fields.proveedor || "";
         purchaseForm.querySelector('[name="nota_global"]').value = draft.fields.nota_global || "";
       }
       if (Array.isArray(draft.lines)) {
         draft.lines.forEach((line) => {
           const sourceRow = productRows.find((tr) => tr.dataset.productId === line.producto_id);
-          if (!sourceRow || sourceRow.dataset.inf === "1") return;
+          if (!sourceRow) return;
+          const isFractional = sourceRow.dataset.fraccionable === "1";
           appendPurchaseRow(
             {
               ...productDataFromRow(sourceRow),
               qty: line.cantidad || "",
-              price: line.precio_compra || "",
+              price: isFractional ? "" : (line.precio_compra || ""),
+              subtotal: line.subtotal_compra || (isFractional ? (line.precio_compra || "") : ""),
+              salePrice: line.precio_venta_actual || sourceRow.dataset.salePrice || "",
+              originalSalePrice: sourceRow.dataset.salePrice || "",
               note: line.nota_linea || "",
             },
             { focus: false }
@@ -411,7 +515,7 @@
       if (isVisible) visible += 1;
     });
 
-    visibleCount.textContent = String(visible);
+    if (visibleCount) visibleCount.textContent = String(visible);
     noResultsBox.hidden = visible !== 0;
   }
 
@@ -436,12 +540,15 @@
     let amount = 0;
 
     rows.forEach((row) => {
-      const q = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
-      const p = parseNumber(row.querySelector('input[name="precio_compra[]"]').value);
-      if (q !== null && !Number.isNaN(q) && q > 0) {
-        if (p !== null && !Number.isNaN(p) && p >= 0) {
-          amount += q * p;
-        }
+      const pricing = getPurchasePricing({
+        qty: row.querySelector('input[name="cantidad[]"]').value,
+        unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
+        subtotal: row.querySelector('input[name="subtotal_compra[]"]').value,
+        fractional: row.dataset.fractional,
+        fractions: row.dataset.fractions,
+      });
+      if (pricing.lineTotal !== null) {
+        amount += pricing.lineTotal;
       }
     });
 
@@ -453,34 +560,227 @@
     syncSelectedState();
   }
 
+  function purchaseRowsSnapshot() {
+    return Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => {
+      const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
+      const qty = row.querySelector('input[name="cantidad[]"]').value || "0";
+      const unitPrice = row.querySelector('input[name="precio_compra[]"]').value || "";
+      const subtotal = row.querySelector('input[name="subtotal_compra[]"]').value || "";
+      const salePrice = row.querySelector('input[name="precio_venta_actual[]"]').value || "";
+      const recommended = row.querySelector(".purchase-sale-recommended")?.textContent?.trim() || "-";
+      const note = row.querySelector('input[name="nota_linea[]"]').value || "";
+      const originalSalePrice = row.dataset.originalSalePrice || "";
+      const stockUnit = row.dataset.stockUnit || "ud";
+      const saleUnit = row.dataset.saleUnit || stockUnit;
+      const fractional = row.dataset.fractional === "1";
+      const fractions = row.dataset.fractions || "1";
+      const pricing = getPurchasePricing({ qty, unitPrice, subtotal, fractional, fractions });
+      return {
+        name,
+        qty,
+        unitPrice,
+        subtotal,
+        salePrice,
+        recommended,
+        note,
+        originalSalePrice,
+        stockUnit,
+        saleUnit,
+        fractional,
+        fractions,
+        lineTotal: pricing.lineTotal,
+        unitPurchasePrice: pricing.unitPurchasePrice,
+      };
+    });
+  }
+
+  function buildPurchaseConfirmList(rows) {
+    if (!purchaseConfirmList) return;
+    purchaseConfirmList.replaceChildren();
+
+    rows.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "invoice-confirm-item";
+
+      const head = document.createElement("div");
+      head.className = "invoice-confirm-item-head";
+
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+
+      const amount = document.createElement("span");
+      const totalValue = item.lineTotal !== null ? formatMoney(item.lineTotal) : "-";
+      amount.textContent = totalValue;
+
+      head.append(title, amount);
+
+      const meta = document.createElement("div");
+      meta.className = "invoice-confirm-item-meta";
+      if (item.fractional) {
+        const subtotalValue = parseNumber(item.subtotal);
+        meta.textContent = `Cantidad ${item.qty} ${item.stockUnit} · P. total ${subtotalValue !== null && !Number.isNaN(subtotalValue) ? formatMoney(subtotalValue) : "-"} · Venta ${item.salePrice || "0"} € / ${item.saleUnit} · Recomendada ${item.recommended}`;
+      } else {
+        const unitPriceValue = parseNumber(item.unitPrice);
+        meta.textContent = `Cantidad ${item.qty} ${item.stockUnit} · P. ud ${unitPriceValue !== null && !Number.isNaN(unitPriceValue) ? formatMoney(unitPriceValue) : "-"} / ${item.stockUnit} · P. total ${item.lineTotal !== null ? formatMoney(item.lineTotal) : "-"} · Venta ${item.salePrice || "0"} € / ${item.saleUnit} · Recomendada ${item.recommended}`;
+      }
+      card.append(head, meta);
+
+      if ((item.note || "").trim()) {
+        const note = document.createElement("div");
+        note.className = "invoice-confirm-item-meta";
+        note.textContent = `Nota: ${item.note.trim()}`;
+        card.appendChild(note);
+      }
+
+      purchaseConfirmList.appendChild(card);
+    });
+
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay líneas para confirmar.";
+      purchaseConfirmList.appendChild(empty);
+    }
+  }
+
+  function buildPurchaseWarningList(rows) {
+    if (!purchaseWarningList) return;
+    purchaseWarningList.replaceChildren();
+
+    const changed = rows.filter((item) => {
+      const original = parseNumber(item.originalSalePrice);
+      const next = parseNumber(item.salePrice);
+      return original !== null && next !== null && !Number.isNaN(original) && !Number.isNaN(next) && Math.abs(original - next) > 1e-9;
+    });
+
+    if (!changed.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay cambios en precios de venta. El inventario mantendrá los valores actuales.";
+      purchaseWarningList.appendChild(empty);
+      return;
+    }
+
+    changed.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "purchase-warning-item";
+
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+
+      const previous = document.createElement("div");
+      previous.className = "purchase-warning-line";
+      previous.textContent = `Precio anterior: ${formatMoney(parseNumber(item.originalSalePrice) || 0)} / ${item.saleUnit} - Precio recomendado: ${item.recommended}`;
+
+      const next = document.createElement("div");
+      next.className = "purchase-warning-line";
+
+      const nextLabel = document.createElement("span");
+      nextLabel.textContent = `Nuevo precio / ${item.saleUnit}: `;
+
+      const nextValue = document.createElement("strong");
+      nextValue.textContent = formatMoney(parseNumber(item.salePrice) || 0);
+
+      next.append(nextLabel, nextValue);
+      card.append(title, previous, next);
+      purchaseWarningList.appendChild(card);
+    });
+  }
+
+  function openPurchaseConfirmDialog() {
+    if (!purchaseConfirmDialog) return;
+    const rows = purchaseRowsSnapshot();
+    buildPurchaseConfirmList(rows);
+    buildPurchaseWarningList(rows);
+    if (purchaseConfirmDate) {
+      purchaseConfirmDate.textContent = purchaseForm.querySelector('[name="fecha_compra"]').value || "-";
+    }
+    if (purchaseConfirmNote) {
+      purchaseConfirmNote.textContent = (purchaseForm.querySelector('[name="nota_global"]').value || "").trim() || "Sin nota";
+    }
+    if (purchaseConfirmTotal) {
+      purchaseConfirmTotal.textContent = sumAmount?.textContent || "0.00 €";
+    }
+    purchaseConfirmDialog.showModal();
+  }
+
+  async function submitPurchaseConfirmed() {
+    if (!confirmPurchaseSubmit) return;
+
+    confirmPurchaseSubmit.disabled = true;
+    const originalText = confirmPurchaseSubmit.textContent;
+    confirmPurchaseSubmit.textContent = "Registrando...";
+
+    try {
+      const formData = new FormData(purchaseForm);
+      const response = await fetch(purchaseForm.action, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudo registrar la compra.");
+      }
+
+      clearDraft();
+      purchaseSubmitting = true;
+      sessionStorage.setItem(toastKey, JSON.stringify({
+        message: `Nueva compra registrada: ${payload.total} € · Ref ${payload.ref_id}`,
+        tone: "success",
+        detail: "",
+      }));
+      window.location.href = payload.redirect_url || "{{ url_for('home') }}";
+    } catch (error) {
+      window.alert(error.message || "No se pudo registrar la compra.");
+    } finally {
+      confirmPurchaseSubmit.disabled = false;
+      confirmPurchaseSubmit.textContent = originalText;
+    }
+  }
+
   function updateSaleRecommendation(row) {
     const recommendedNode = row.querySelector(".purchase-sale-recommended");
     if (!recommendedNode) return;
 
-    const purchasePrice = parseNumber(row.querySelector('input[name="precio_compra[]"]').value);
-    if (purchasePrice === null || Number.isNaN(purchasePrice) || purchasePrice < 0) {
+    const pricing = getPurchasePricing({
+      qty: row.querySelector('input[name="cantidad[]"]').value,
+      unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
+      subtotal: row.querySelector('input[name="subtotal_compra[]"]').value,
+      fractional: row.dataset.fractional,
+      fractions: row.dataset.fractions,
+    });
+    if (pricing.recommendedSalePrice === null) {
       recommendedNode.textContent = "-";
       return;
     }
 
-    recommendedNode.textContent = formatMoney(purchasePrice * 1.2);
+    recommendedNode.textContent = formatMoney(pricing.recommendedSalePrice);
   }
 
   function attachTicketEvents(row) {
     const qty = row.querySelector('input[name="cantidad[]"]');
-    const price = row.querySelector('input[name="precio_compra[]"]');
+    const unitPrice = row.querySelector('input[name="precio_compra[]"]');
+    const subtotal = row.querySelector('input[name="subtotal_compra[]"]');
+    const salePrice = row.querySelector('input[name="precio_venta_actual[]"]');
     const note = row.querySelector('input[name="nota_linea[]"]');
     const removeBtn = row.querySelector(".purchase-remove");
     const pid = row.querySelector(".ticket-product-id").value;
 
-    [qty, price].forEach((el) => {
+    [qty, unitPrice, subtotal, salePrice].forEach((el) => {
       el.addEventListener("input", () => {
         setFieldState(el, validateField(el));
-        if (el === price) updateSaleRecommendation(row);
-        refreshSummary();
+        if (el === qty || el === unitPrice || el === subtotal) {
+          syncLinePricing(row);
+        } else {
+          refreshSummary();
+        }
+        saveDraft();
       });
     });
-    note.addEventListener("input", refreshSummary);
+    note.addEventListener("input", saveDraft);
 
     removeBtn.addEventListener("click", () => {
       selectedById.delete(pid);
@@ -496,13 +796,14 @@
   function addProductToTicket(sourceRow) {
     const pid = sourceRow.dataset.productId;
     if (!pid) return;
-    if (sourceRow.dataset.inf === "1") return;
 
     if (selectedById.has(pid)) {
-      const qtyInput = selectedById.get(pid).querySelector('input[name="cantidad[]"]');
+      const existingRow = selectedById.get(pid);
+      const qtyInput = existingRow.querySelector('input[name="cantidad[]"]');
       const currentQty = parseNumber(qtyInput.value);
       qtyInput.value = String((currentQty !== null && !Number.isNaN(currentQty) ? currentQty : 0) + 1);
       setFieldState(qtyInput, validateField(qtyInput));
+      syncLinePricing(existingRow);
       refreshSummary();
       saveDraft();
       qtyInput.focus();
@@ -540,14 +841,18 @@
     applyProductFilters();
     syncFilterState();
   });
-  clearFiltersBtn.addEventListener("click", () => {
-    searchBox.value = "";
-    groupFilter.value = "";
-    applyProductFilters();
-    syncFilterState();
-    saveDraft();
-  });
-  clearLinesBtn.addEventListener("click", clearTicket);
+  if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener("click", () => {
+      searchBox.value = "";
+      groupFilter.value = "";
+      applyProductFilters();
+      syncFilterState();
+      saveDraft();
+    });
+  }
+  if (clearLinesBtn) {
+    clearLinesBtn.addEventListener("click", clearTicket);
+  }
   purchaseForm.addEventListener("input", saveDraft);
   purchaseForm.addEventListener("change", saveDraft);
 
@@ -574,6 +879,18 @@
   refreshEmptyState();
   refreshSummary();
 
+  if (closePurchaseConfirmDialog && purchaseConfirmDialog) {
+    closePurchaseConfirmDialog.addEventListener("click", () => purchaseConfirmDialog.close());
+    purchaseConfirmDialog.addEventListener("click", (event) => {
+      if (event.target === purchaseConfirmDialog) {
+        purchaseConfirmDialog.close();
+      }
+    });
+  }
+  if (confirmPurchaseSubmit) {
+    confirmPurchaseSubmit.addEventListener("click", submitPurchaseConfirmed);
+  }
+
   window.addEventListener("beforeunload", (e) => {
     if (purchaseSubmitting || !hasDraftContent()) return;
     e.preventDefault();
@@ -590,6 +907,7 @@
 
     let hasErrors = false;
     rows.forEach((row) => {
+      syncLinePricing(row);
       row.querySelectorAll(".js-purchase-field").forEach((field) => {
         const state = validateField(field);
         setFieldState(field, state);
@@ -606,16 +924,21 @@
     }
 
     rows.forEach((row) => {
-      ["cantidad[]", "precio_compra[]"].forEach((name) => {
+      ["cantidad[]", "precio_compra[]", "subtotal_compra[]"].forEach((name) => {
         const input = row.querySelector(`[name="${name}"]`);
         const n = parseNumber(input.value);
         if (n !== null && !Number.isNaN(n)) {
           input.value = String(n);
         }
       });
+      const salePriceInput = row.querySelector('[name="precio_venta_actual[]"]');
+      const salePriceValue = parseNumber(salePriceInput.value);
+      if (salePriceValue !== null && !Number.isNaN(salePriceValue)) {
+        salePriceInput.value = String(salePriceValue);
+      }
     });
-    purchaseSubmitting = true;
-    clearDraft();
+    e.preventDefault();
+    openPurchaseConfirmDialog();
   });
 </script>
 {% endblock %}

@@ -1,19 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="panel page-intro page-header-bar">
-  <div class="page-header-main">
-    <h1 class="page-title page-title-left">Nueva factura</h1>
-    <a class="btn btn-secondary btn-small" href="{{ url_for('historial_facturas') }}">Historial</a>
-  </div>
-</section>
 
 <div class="purchase-layout">
   <section class="panel purchase-left">
-    <div class="section-head compact-head">
-      <h2 class="section-heading">Productos</h2>
-      <span class="header-count" id="invoiceVisibleCount">{{ products|length }}</span>
-    </div>
-
     <div class="inv-filters">
       <div>
         <label class="label" for="invoiceSearch">Buscar</label>
@@ -30,10 +19,6 @@
       </div>
     </div>
 
-    <div class="toolbar-inline actions-end">
-      <button class="btn btn-secondary btn-small" type="button" id="invoiceClearFilters">Limpiar filtros</button>
-    </div>
-
     <div class="inv-scrollbox purchase-products-box">
       <table class="table">
         <thead>
@@ -45,30 +30,28 @@
         <tbody>
           {% for p in products %}
             <tr
-              class="row-click invoice-product-row{% if p.stock_infinito != '1' and p.stock_zero == '1' %} purchase-product-row-disabled{% endif %}"
+              class="row-click invoice-product-row"
               data-product-id="{{ p.producto_id }}"
               data-name="{{ p.nombre }}"
               data-group="{{ p.grupo }}"
-              data-unit="{{ p.unidad }}"
+              data-stock-unit="{{ p.unidad_stock }}"
+              data-sale-unit="{{ p.unidad_venta }}"
               data-emoji="{{ p.grupo_emoji }}"
               data-inf="{{ p.stock_infinito }}"
+              data-fraccionable="{{ p.fraccionable }}"
+              data-fractions="{{ p.fracciones_por_unidad }}"
               data-price="{{ p.precio_unitario or '0' }}"
-              data-locked="{% if p.stock_infinito != '1' and p.stock_zero == '1' %}1{% else %}0{% endif %}"
-              {% if p.stock_infinito != '1' and p.stock_zero == '1' %}
-                tabindex="-1"
-                aria-disabled="true"
-                aria-label="{{ p.nombre }} sin stock disponible para facturar"
-              {% else %}
-                tabindex="0"
-                role="button"
-                aria-label="Anadir {{ p.nombre }} a la factura"
-              {% endif %}
+              tabindex="0"
+              role="button"
+              aria-label="Anadir {{ p.nombre }} a la factura"
             >
               <td>
                 <div class="product-row-head">
                   <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
                   {% if p.stock_infinito == "1" %}
                     <span class="product-state state-inf">INF</span>
+                  {% elif p.stock_negative == "1" %}
+                    <span class="product-state state-negative">NEG</span>
                   {% elif p.stock_zero == "1" %}
                     <span class="product-state state-zero">0</span>
                   {% elif p.stock_bajo == "1" %}
@@ -77,17 +60,17 @@
                     <span class="product-state state-ok">OK</span>
                   {% endif %}
                 </div>
-                <div class="product-row-meta">{{ p.grupo_emoji }} {{ p.grupo }} · {{ p.unidad }}</div>
+                {% if p.fraccionable == "1" %}
+                  <div class="help product-subtext">Venta en {{ p.unidad_venta }} · {{ p.fraccion_info }}</div>
+                {% endif %}
               </td>
               <td class="right">
                 {% if p.stock_infinito == "1" %}
                   ♾️
                 {% else %}
-                  {% set cur = (p.stock_actual or 0) %}
-                  {% if (cur % 1) == 0 %}
-                    {{ "%.0f"|format(cur) }} {{ p.unidad }}
-                  {% else %}
-                    {{ "%.2f"|format(cur) }} {{ p.unidad }}
+                  <div class="stock-display-main">{{ p.stock_display_main }}</div>
+                  {% if p.stock_display_meta %}
+                    <div class="stock-display-meta">{{ p.stock_display_meta }}</div>
                   {% endif %}
                 {% endif %}
               </td>
@@ -100,60 +83,40 @@
   </section>
 
   <section class="panel purchase-right">
-    <div class="section-head compact-head">
-      <h2 class="section-heading">Factura</h2>
-    </div>
-
     <form method="post" action="{{ url_for('nueva_factura_post') }}" id="invoiceForm" class="form">
       <input type="hidden" name="f_q" id="invoiceFQ" value="{{ current_filters.q }}">
       <input type="hidden" name="f_g" id="invoiceFG" value="{{ current_filters.g }}">
-      <div class="grid-2">
-        <div>
-          <label class="label">Fecha factura</label>
-          <input class="input" type="date" name="fecha_factura" value="{{ today_iso }}" required>
-        </div>
-        <div>
-          <label class="label">Cliente</label>
-          <input class="input" name="cliente" placeholder="Ej: Mesa socios sabado">
-        </div>
-      </div>
-
-      <div>
-        <label class="label">Nota global</label>
-        <input class="input" name="nota_global" placeholder="Observacion general">
-      </div>
-
-      <div class="toolbar-inline actions-end ticket-toolbar">
-        <span class="draft-status" id="invoiceDraftStatus" data-state="empty">Borrador vacio</span>
-        <button class="btn btn-secondary btn-small" type="button" id="invoiceClearLines">Vaciar ticket</button>
+      <div class="invoice-inline-fields">
+        <label class="label" for="invoiceDate">Fecha</label>
+        <input id="invoiceDate" class="input" type="date" name="fecha_factura" value="{{ today_iso }}" required>
+        <label class="label" for="invoiceNote">Nota</label>
+        <input id="invoiceNote" class="input" name="nota_global" placeholder="Observacion general">
       </div>
 
       <div class="inv-scrollbox purchase-lines-box">
-        <table class="table purchase-table">
+        <table class="table purchase-table invoice-lines-table">
           <thead>
             <tr>
               <th>Producto</th>
-              <th class="right">Cantidad</th>
-              <th class="right">Precio unitario</th>
-              <th class="right">Importe</th>
-              <th>Nota linea</th>
+              <th class="invoice-head-center">Cantidad</th>
+              <th class="invoice-head-center">Precio</th>
+              <th class="invoice-head-center">Importe</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="invoiceLines">
             <tr id="invoiceEmpty">
-              <td colspan="6" class="empty">Selecciona productos desde la columna izquierda.</td>
+              <td colspan="5" class="empty">Selecciona productos desde la columna izquierda.</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
-        Total: <strong id="sumAmountPinned">0.00 €</strong>
-      </div>
-
-      <div class="actions">
+      <div class="invoice-submit-row">
         <button class="btn btn-primary" type="submit">Registrar factura</button>
+        <div class="invoice-total-live" aria-live="polite" aria-atomic="true">
+          Total: <strong id="sumAmountPinned">0.00 €</strong>
+        </div>
       </div>
     </form>
   </section>
@@ -161,28 +124,50 @@
 
 <template id="invoiceRowTpl">
   <tr class="invoice-row">
-    <td>
+    <td class="invoice-col-product">
       <input type="hidden" name="producto_id[]" class="ticket-product-id">
+      <input type="hidden" name="precio_unitario[]" class="ticket-product-price">
       <div class="ticket-product-name"></div>
-      <div class="help ticket-product-meta"></div>
+      <div class="ticket-product-meta"></div>
     </td>
-    <td class="right">
+    <td class="right invoice-col-qty">
       <input class="input input-num js-invoice-field" name="cantidad[]" data-rule="positive-number" placeholder="0">
     </td>
-    <td class="right">
-      <input class="input input-num js-invoice-field" name="precio_unitario[]" data-rule="non-negative-number" placeholder="0.00">
+    <td class="right invoice-col-price">
+      <div class="readonly js-line-price">0.00 €</div>
     </td>
-    <td class="right">
+    <td class="right invoice-col-amount">
       <div class="readonly js-line-amount">0.00 €</div>
     </td>
-    <td>
-      <input class="input" name="nota_linea[]" placeholder="Opcional">
-    </td>
-    <td>
-      <button type="button" class="btn btn-secondary purchase-remove">Eliminar</button>
+    <td class="invoice-col-remove">
+      <button type="button" class="btn btn-secondary purchase-remove" aria-label="Eliminar linea">X</button>
     </td>
   </tr>
 </template>
+
+<dialog class="shopping-dialog invoice-confirm-dialog" id="invoiceConfirmDialog">
+  <div class="shopping-dialog-shell">
+    <div class="shopping-dialog-header">
+      <div>
+        <h2 class="section-heading">Confirmar factura</h2>
+        <p class="section-subtitle">Revisa las líneas antes de registrar e imprimir la factura.</p>
+      </div>
+    </div>
+
+    <div class="invoice-confirm-meta">
+      <span><strong>Fecha:</strong> <span id="invoiceConfirmDate">-</span></span>
+      <span><strong>Nota:</strong> <span id="invoiceConfirmNote">-</span></span>
+      <span><strong>Total:</strong> <span id="invoiceConfirmTotal">0.00 €</span></span>
+    </div>
+
+    <div class="shopping-dialog-list invoice-confirm-list" id="invoiceConfirmList"></div>
+
+    <div class="shopping-dialog-actions">
+      <button class="btn btn-secondary" type="button" id="closeInvoiceConfirmDialog">Cancelar</button>
+      <button class="btn btn-primary" type="button" id="confirmInvoiceSubmit">Imprimir y registrar</button>
+    </div>
+  </div>
+</dialog>
 
 <script>
   function normalizeText(s) {
@@ -249,8 +234,16 @@
   const hiddenFQ = document.getElementById("invoiceFQ");
   const hiddenFG = document.getElementById("invoiceFG");
   const sumAmountPinned = document.getElementById("sumAmountPinned");
+  const invoiceConfirmDialog = document.getElementById("invoiceConfirmDialog");
+  const closeInvoiceConfirmDialog = document.getElementById("closeInvoiceConfirmDialog");
+  const confirmInvoiceSubmit = document.getElementById("confirmInvoiceSubmit");
+  const invoiceConfirmList = document.getElementById("invoiceConfirmList");
+  const invoiceConfirmDate = document.getElementById("invoiceConfirmDate");
+  const invoiceConfirmNote = document.getElementById("invoiceConfirmNote");
+  const invoiceConfirmTotal = document.getElementById("invoiceConfirmTotal");
   const selectedById = new Map();
   const draftKey = "buen-yantar:invoice-draft:v1";
+  const toastKey = "buen-yantar:toast";
   let invoiceSubmitting = false;
 
   function productDataFromRow(sourceRow) {
@@ -259,8 +252,11 @@
       name: sourceRow.dataset.name || "",
       emoji: sourceRow.dataset.emoji || "📦",
       group: sourceRow.dataset.group || "Otros",
-      unit: sourceRow.dataset.unit || "ud",
+      stockUnit: sourceRow.dataset.stockUnit || "ud",
+      saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
       inf: sourceRow.dataset.inf === "1",
+      fractional: sourceRow.dataset.fraccionable === "1",
+      fractions: sourceRow.dataset.fractions || "1",
       defaultPrice: sourceRow.dataset.price || "0",
     };
   }
@@ -270,7 +266,6 @@
       selectedById.size > 0
       || (searchBox.value || "").trim() !== ""
       || (groupFilter.value || "").trim() !== ""
-      || (invoiceForm.querySelector('[name="cliente"]').value || "").trim() !== ""
       || (invoiceForm.querySelector('[name="nota_global"]').value || "").trim() !== ""
     );
   }
@@ -289,14 +284,12 @@
       },
       fields: {
         fecha_factura: invoiceForm.querySelector('[name="fecha_factura"]').value || "",
-        cliente: invoiceForm.querySelector('[name="cliente"]').value || "",
         nota_global: invoiceForm.querySelector('[name="nota_global"]').value || "",
       },
       lines: Array.from(invoiceLines.querySelectorAll(".invoice-row")).map((row) => ({
         producto_id: row.querySelector(".ticket-product-id").value,
         cantidad: row.querySelector('input[name="cantidad[]"]').value || "",
         precio_unitario: row.querySelector('input[name="precio_unitario[]"]').value || "",
-        nota_linea: row.querySelector('input[name="nota_linea[]"]').value || "",
       })),
     };
   }
@@ -319,11 +312,17 @@
   function appendInvoiceRow(data, options = {}) {
     const row = rowTpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ticket-product-id").value = data.pid;
+    row.querySelector(".ticket-product-price").value = data.price ?? data.defaultPrice ?? "0";
     row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
-    row.querySelector(".ticket-product-meta").textContent = `${data.emoji} ${data.group} · ${data.unit}${data.inf ? " · ∞" : ""}`;
+    row.querySelector(".ticket-product-meta").textContent = data.fractional
+      ? `Venta en ${data.saleUnit} · Descuenta 1/${data.fractions} ${data.stockUnit}`
+      : `Unidad de venta: ${data.saleUnit}`;
     row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "1";
-    row.querySelector('input[name="precio_unitario[]"]').value = data.price ?? data.defaultPrice ?? "0";
-    row.querySelector('input[name="nota_linea[]"]').value = data.note ?? "";
+    row.querySelector(".js-line-price").textContent = `${(parseNumber(data.price ?? data.defaultPrice ?? "0") ?? 0).toFixed(2)} €`;
+    row.dataset.saleUnit = data.saleUnit || "ud";
+    row.dataset.stockUnit = data.stockUnit || "ud";
+    row.dataset.fractional = data.fractional ? "1" : "0";
+    row.dataset.fractions = data.fractions || "1";
 
     invoiceLines.appendChild(row);
     selectedById.set(data.pid, row);
@@ -352,20 +351,18 @@
       }
       if (draft.fields) {
         invoiceForm.querySelector('[name="fecha_factura"]').value = draft.fields.fecha_factura || invoiceForm.querySelector('[name="fecha_factura"]').value;
-        invoiceForm.querySelector('[name="cliente"]').value = draft.fields.cliente || "";
         invoiceForm.querySelector('[name="nota_global"]').value = draft.fields.nota_global || "";
       }
       if (Array.isArray(draft.lines)) {
         draft.lines.forEach((line) => {
           const sourceRow = productRows.find((tr) => tr.dataset.productId === line.producto_id);
-          if (!sourceRow || sourceRow.dataset.locked === "1") return;
+          if (!sourceRow) return;
           const product = productDataFromRow(sourceRow);
           appendInvoiceRow(
             {
               ...product,
               qty: line.cantidad || "1",
               price: line.precio_unitario || product.defaultPrice,
-              note: line.nota_linea || "",
             },
             { focus: false }
           );
@@ -400,7 +397,7 @@
       if (isVisible) visible += 1;
     });
 
-    visibleCount.textContent = String(visible);
+    if (visibleCount) visibleCount.textContent = String(visible);
     noResultsBox.hidden = visible !== 0;
   }
 
@@ -433,6 +430,106 @@
     amountBox.textContent = `${(qty * price).toFixed(2)} €`;
   }
 
+  function invoiceRowsSnapshot() {
+    return Array.from(invoiceLines.querySelectorAll(".invoice-row")).map((row) => {
+      const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
+      const qty = row.querySelector('input[name="cantidad[]"]').value || "0";
+      const price = row.querySelector('input[name="precio_unitario[]"]').value || "0";
+      const amount = row.querySelector(".js-line-amount")?.textContent?.trim() || "0.00 €";
+      const saleUnit = row.dataset.saleUnit || "ud";
+      return { name, qty, price, amount, saleUnit };
+    });
+  }
+
+  function buildInvoiceConfirmList(rows) {
+    if (!invoiceConfirmList) return;
+    invoiceConfirmList.replaceChildren();
+
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay líneas para confirmar.";
+      invoiceConfirmList.appendChild(empty);
+      return;
+    }
+
+    rows.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "invoice-confirm-item";
+
+      const head = document.createElement("div");
+      head.className = "invoice-confirm-item-head";
+
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+
+      const amount = document.createElement("span");
+      amount.textContent = item.amount;
+
+      head.append(title, amount);
+
+      const meta = document.createElement("div");
+      meta.className = "invoice-confirm-item-meta";
+      meta.textContent = `Cantidad ${item.qty} ${item.saleUnit} · Precio ${Number.parseFloat(item.price || "0").toFixed(2)} € / ${item.saleUnit}`;
+
+      card.append(head, meta);
+      invoiceConfirmList.appendChild(card);
+    });
+  }
+
+  function openInvoiceConfirmDialog() {
+    if (!invoiceConfirmDialog) return;
+    const rows = invoiceRowsSnapshot();
+    buildInvoiceConfirmList(rows);
+    if (invoiceConfirmDate) {
+      invoiceConfirmDate.textContent = invoiceForm.querySelector('[name="fecha_factura"]').value || "-";
+    }
+    if (invoiceConfirmNote) {
+      invoiceConfirmNote.textContent = (invoiceForm.querySelector('[name="nota_global"]').value || "").trim() || "Sin nota";
+    }
+    if (invoiceConfirmTotal) {
+      invoiceConfirmTotal.textContent = sumAmountPinned?.textContent || "0.00 €";
+    }
+    invoiceConfirmDialog.showModal();
+  }
+
+  async function submitInvoiceConfirmed() {
+    if (!confirmInvoiceSubmit) return;
+
+    confirmInvoiceSubmit.disabled = true;
+    const originalText = confirmInvoiceSubmit.textContent;
+    confirmInvoiceSubmit.textContent = "Registrando...";
+
+    try {
+      const formData = new FormData(invoiceForm);
+      const response = await fetch(invoiceForm.action, {
+        method: "POST",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudo registrar la factura.");
+      }
+
+      clearDraft();
+      invoiceSubmitting = true;
+      sessionStorage.setItem(toastKey, JSON.stringify({
+        message: `Nueva factura registrada: ${payload.total} € · Ref ${payload.factura_id}`,
+        tone: payload.print_warning ? "warning" : "success",
+        detail: payload.print_warning || "",
+      }));
+      window.location.href = payload.redirect_url || "{{ url_for('home') }}";
+    } catch (error) {
+      window.alert(error.message || "No se pudo registrar la factura.");
+    } finally {
+      confirmInvoiceSubmit.disabled = false;
+      confirmInvoiceSubmit.textContent = originalText;
+    }
+  }
+
   function refreshSummary() {
     const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
     let amount = 0;
@@ -459,18 +556,14 @@
 
   function attachRowEvents(row) {
     const qty = row.querySelector('input[name="cantidad[]"]');
-    const price = row.querySelector('input[name="precio_unitario[]"]');
-    const note = row.querySelector('input[name="nota_linea[]"]');
     const removeBtn = row.querySelector(".purchase-remove");
     const pid = row.querySelector(".ticket-product-id").value;
 
-    [qty, price].forEach((el) => {
-      el.addEventListener("input", () => {
-        setFieldState(el, validateField(el));
-        refreshSummary();
-      });
+    qty.addEventListener("input", () => {
+      setFieldState(qty, validateField(qty));
+      refreshSummary();
+      saveDraft();
     });
-    note.addEventListener("input", refreshSummary);
 
     removeBtn.addEventListener("click", () => {
       selectedById.delete(pid);
@@ -484,7 +577,6 @@
   function addProductToInvoice(sourceRow) {
     const pid = sourceRow.dataset.productId;
     if (!pid) return;
-    if (sourceRow.dataset.locked === "1") return;
 
     if (selectedById.has(pid)) {
       const qtyInput = selectedById.get(pid).querySelector('input[name="cantidad[]"]');
@@ -528,14 +620,18 @@
     applyProductFilters();
     syncFilterState();
   });
-  clearFiltersBtn.addEventListener("click", () => {
-    searchBox.value = "";
-    groupFilter.value = "";
-    applyProductFilters();
-    syncFilterState();
-    saveDraft();
-  });
-  clearLinesBtn.addEventListener("click", clearTicket);
+  if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener("click", () => {
+      searchBox.value = "";
+      groupFilter.value = "";
+      applyProductFilters();
+      syncFilterState();
+      saveDraft();
+    });
+  }
+  if (clearLinesBtn) {
+    clearLinesBtn.addEventListener("click", clearTicket);
+  }
   invoiceForm.addEventListener("input", saveDraft);
   invoiceForm.addEventListener("change", saveDraft);
 
@@ -561,6 +657,18 @@
   syncFilterState();
   refreshEmptyState();
   refreshSummary();
+
+  if (closeInvoiceConfirmDialog && invoiceConfirmDialog) {
+    closeInvoiceConfirmDialog.addEventListener("click", () => invoiceConfirmDialog.close());
+    invoiceConfirmDialog.addEventListener("click", (event) => {
+      if (event.target === invoiceConfirmDialog) {
+        invoiceConfirmDialog.close();
+      }
+    });
+  }
+  if (confirmInvoiceSubmit) {
+    confirmInvoiceSubmit.addEventListener("click", submitInvoiceConfirmed);
+  }
 
   window.addEventListener("beforeunload", (e) => {
     if (invoiceSubmitting || !hasDraftContent()) return;
@@ -594,7 +702,7 @@
     }
 
     rows.forEach((row) => {
-      ["cantidad[]", "precio_unitario[]"].forEach((name) => {
+      ["cantidad[]"].forEach((name) => {
         const input = row.querySelector(`[name="${name}"]`);
         const n = parseNumber(input.value);
         if (n !== null && !Number.isNaN(n)) {
@@ -602,8 +710,8 @@
         }
       });
     });
-    invoiceSubmitting = true;
-    clearDraft();
+    e.preventDefault();
+    openInvoiceConfirmDialog();
   });
 </script>
 {% endblock %}
