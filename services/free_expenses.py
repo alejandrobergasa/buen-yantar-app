@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List
 
@@ -75,7 +76,7 @@ def create_free_expense(
 
 def list_free_expenses(expenses_csv: Path, limit: int = 400) -> List[Dict[str, str]]:
     rows = read_all(expenses_csv)
-    rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
     if limit <= 0:
+        rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
         return rows
-    return rows[:limit]
+    return nlargest(limit, rows, key=lambda x: x.get("fecha", ""))

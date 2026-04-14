@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List
 
@@ -38,7 +39,7 @@ def log_action(
 
 def list_logs(logs_csv: Path, limit: int = 1200) -> List[Dict[str, str]]:
     rows = read_all(logs_csv)
-    rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
     if limit <= 0:
+        rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
         return rows
-    return rows[:limit]
+    return nlargest(limit, rows, key=lambda x: x.get("fecha", ""))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -132,10 +133,10 @@ def create_invoice(
 
 def list_invoices(facturas_csv: Path, limit: int = 400) -> List[Dict[str, str]]:
     rows = read_all(facturas_csv)
-    rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
     if limit <= 0:
+        rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
         return rows
-    return rows[:limit]
+    return nlargest(limit, rows, key=lambda x: x.get("fecha", ""))
 
 
 def list_invoice_lines(facturas_lineas_csv: Path) -> List[Dict[str, str]]:

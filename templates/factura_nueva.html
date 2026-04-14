@@ -27,7 +27,7 @@
             <th class="right">Stock</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="invoiceProductsTbody">
           {% for p in products %}
             <tr
               class="row-click invoice-product-row"
@@ -60,7 +60,7 @@
                     <span class="product-state state-ok">OK</span>
                   {% endif %}
                 </div>
-                {% if p.fraccionable == "1" %}
+                {% if not low_resource_mode and p.fraccionable == "1" %}
                   <div class="help product-subtext">Venta en {{ p.unidad_venta }} · {{ p.fraccion_info }}</div>
                 {% endif %}
               </td>
@@ -69,7 +69,7 @@
                   ♾️
                 {% else %}
                   <div class="stock-display-main">{{ p.stock_display_main }}</div>
-                  {% if p.stock_display_meta %}
+                  {% if not low_resource_mode and p.stock_display_meta %}
                     <div class="stock-display-meta">{{ p.stock_display_meta }}</div>
                   {% endif %}
                 {% endif %}
@@ -145,6 +145,7 @@
   </tr>
 </template>
 
+{% if not low_resource_mode %}
 <dialog class="shopping-dialog invoice-confirm-dialog" id="invoiceConfirmDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -168,8 +169,14 @@
     </div>
   </div>
 </dialog>
+{% endif %}
 
+{% if low_resource_mode %}
+  {% include "_factura_nueva_low_script.html" %}
+{% else %}
 <script>
+  const lowResourceMode = {{ "true" if low_resource_mode else "false" }};
+
   function normalizeText(s) {
     return (s || "")
       .toString()
@@ -193,6 +200,14 @@
     }
     const n = Number(t);
     return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function debounce(fn, delay) {
+    let timerId = 0;
+    return (...args) => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => fn(...args), delay);
+    };
   }
 
   function setFieldState(el, state) {
@@ -245,6 +260,12 @@
   const draftKey = "buen-yantar:invoice-draft:v1";
   const toastKey = "buen-yantar:toast";
   let invoiceSubmitting = false;
+  const scheduleDraftSave = debounce(saveDraft, 300);
+  const scheduleProductFilter = debounce(() => {
+    applyProductFilters();
+    syncFilterState();
+    scheduleDraftSave();
+  }, 120);
 
   function productDataFromRow(sourceRow) {
     return {
@@ -262,6 +283,7 @@
   }
 
   function hasDraftContent() {
+    if (lowResourceMode) return false;
     return (
       selectedById.size > 0
       || (searchBox.value || "").trim() !== ""
@@ -271,7 +293,7 @@
   }
 
   function updateDraftStatus(state, text) {
-    if (!draftStatus) return;
+    if (!draftStatus || lowResourceMode) return;
     draftStatus.dataset.state = state;
     draftStatus.textContent = text;
   }
@@ -295,6 +317,7 @@
   }
 
   function saveDraft() {
+    if (lowResourceMode) return;
     if (!hasDraftContent()) {
       sessionStorage.removeItem(draftKey);
       updateDraftStatus("empty", "Borrador vacio");
@@ -305,6 +328,7 @@
   }
 
   function clearDraft() {
+    if (lowResourceMode) return;
     sessionStorage.removeItem(draftKey);
     updateDraftStatus("empty", "Borrador vacio");
   }
@@ -337,6 +361,10 @@
   }
 
   function restoreDraft() {
+    if (lowResourceMode) {
+      updateDraftStatus("empty", "Modo rapido activo");
+      return;
+    }
     const raw = sessionStorage.getItem(draftKey);
     if (!raw) {
       updateDraftStatus("empty", "Borrador vacio");
@@ -430,6 +458,7 @@
     amountBox.textContent = `${(qty * price).toFixed(2)} €`;
   }
 
+  {% if not low_resource_mode %}
   function invoiceRowsSnapshot() {
     return Array.from(invoiceLines.querySelectorAll(".invoice-row")).map((row) => {
       const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
@@ -529,6 +558,7 @@
       confirmInvoiceSubmit.textContent = originalText;
     }
   }
+  {% endif %}
 
   function refreshSummary() {
     const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
@@ -562,7 +592,6 @@
     qty.addEventListener("input", () => {
       setFieldState(qty, validateField(qty));
       refreshSummary();
-      saveDraft();
     });
 
     removeBtn.addEventListener("click", () => {
@@ -602,23 +631,27 @@
     saveDraft();
   }
 
-  productRows.forEach((tr) => {
-    tr.addEventListener("click", () => addProductToInvoice(tr));
-    tr.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        addProductToInvoice(tr);
+  const invoiceProductsTbody = document.getElementById("invoiceProductsTbody");
+  if (invoiceProductsTbody) {
+    invoiceProductsTbody.addEventListener("click", (event) => {
+      const row = event.target.closest(".invoice-product-row");
+      if (row) addProductToInvoice(row);
+    });
+    invoiceProductsTbody.addEventListener("keydown", (event) => {
+      const row = event.target.closest(".invoice-product-row");
+      if (!row) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        addProductToInvoice(row);
       }
     });
-  });
+  }
 
-  searchBox.addEventListener("input", () => {
-    applyProductFilters();
-    syncFilterState();
-  });
+  searchBox.addEventListener("input", scheduleProductFilter);
   groupFilter.addEventListener("change", () => {
     applyProductFilters();
     syncFilterState();
+    saveDraft();
   });
   if (clearFiltersBtn) {
     clearFiltersBtn.addEventListener("click", () => {
@@ -632,7 +665,7 @@
   if (clearLinesBtn) {
     clearLinesBtn.addEventListener("click", clearTicket);
   }
-  invoiceForm.addEventListener("input", saveDraft);
+  invoiceForm.addEventListener("input", scheduleDraftSave);
   invoiceForm.addEventListener("change", saveDraft);
 
   document.addEventListener("keydown", (e) => {
@@ -658,6 +691,7 @@
   refreshEmptyState();
   refreshSummary();
 
+  {% if not low_resource_mode %}
   if (closeInvoiceConfirmDialog && invoiceConfirmDialog) {
     closeInvoiceConfirmDialog.addEventListener("click", () => invoiceConfirmDialog.close());
     invoiceConfirmDialog.addEventListener("click", (event) => {
@@ -675,6 +709,7 @@
     e.preventDefault();
     e.returnValue = "";
   });
+  {% endif %}
 
   invoiceForm.addEventListener("submit", (e) => {
     const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
@@ -710,8 +745,11 @@
         }
       });
     });
+    {% if not low_resource_mode %}
     e.preventDefault();
     openInvoiceConfirmDialog();
+    {% endif %}
   });
 </script>
+{% endif %}
 {% endblock %}

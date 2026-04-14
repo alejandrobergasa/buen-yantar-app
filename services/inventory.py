@@ -25,6 +25,17 @@ PRODUCT_HEADERS = [
 MOV_HEADERS = ["mov_id", "fecha", "producto_id", "tipo", "cantidad", "origen", "ref_id", "nota"]
 
 TRUTHY_VALUES = {"1", "true", "True", "on", "yes", "si", "sí"}
+_PRODUCTS_CACHE: Dict[tuple[str, int, int], Dict[str, object]] = {}
+_STOCK_CACHE: Dict[tuple[str, int, int], Dict[str, float]] = {}
+_PURCHASES_CACHE: Dict[tuple[str, int, int], Dict[str, List[Dict[str, str]]]] = {}
+
+
+def _file_cache_key(path: Path) -> tuple[str, int, int]:
+    resolved = str(path.resolve())
+    if not path.exists():
+        return (resolved, 0, 0)
+    stat = path.stat()
+    return (resolved, stat.st_mtime_ns, stat.st_size)
 
 
 def _format_number(value: float, decimals: int = 4) -> str:
@@ -65,17 +76,17 @@ def _normalize_product_row(row: Dict[str, str]) -> Dict[str, str]:
 
 
 def product_is_fractionable(product: Dict[str, str]) -> bool:
-    return _normalize_product_row(product).get("fraccionable") == "1"
+    return (product.get("fraccionable") or "").strip() in TRUTHY_VALUES and _parse_fraction_count(product.get("fracciones_por_unidad")) > 0
 
 
 def product_fraction_count(product: Dict[str, str]) -> float:
-    normalized = _normalize_product_row(product)
-    return _parse_fraction_count(normalized.get("fracciones_por_unidad"))
+    return _parse_fraction_count(product.get("fracciones_por_unidad"))
 
 
 def product_sale_unit(product: Dict[str, str]) -> str:
-    normalized = _normalize_product_row(product)
-    return (normalized.get("unidad_venta") or normalized.get("unidad") or "ud").strip() or "ud"
+    stock_unit = (product.get("unidad") or "ud").strip() or "ud"
+    sale_unit = (product.get("unidad_venta") or "").strip() or stock_unit
+    return sale_unit if product_is_fractionable(product) else stock_unit
 
 
 def sale_quantity_to_stock_quantity(product: Dict[str, str], sale_quantity: float) -> float:
@@ -231,19 +242,37 @@ def ensure_demo_products(productos_csv: Path) -> None:
     append_rows(productos_csv, demo, PRODUCT_HEADERS)
 
 def get_products(productos_csv: Path) -> List[Dict[str, str]]:
-    products: List[Dict[str, str]] = []
-    for row in read_all(productos_csv):
-        normalized = _normalize_product_row(row)
-        if normalized.get("activo", "1") == "1":
+    cache_key = _file_cache_key(productos_csv)
+    cached = _PRODUCTS_CACHE.get(cache_key)
+    if cached is None:
+        products: List[Dict[str, str]] = []
+        by_id: Dict[str, Dict[str, str]] = {}
+        for row in read_all(productos_csv):
+            normalized = _normalize_product_row(row)
+            if normalized.get("activo", "1") != "1":
+                continue
             products.append(normalized)
-    return products
+            product_id = normalized.get("producto_id", "")
+            if product_id:
+                by_id[product_id] = normalized
+        cached = {
+            "products": products,
+            "by_id": by_id,
+        }
+        _PRODUCTS_CACHE.clear()
+        _PRODUCTS_CACHE[cache_key] = cached
+    return list(cached["products"])
 
 def find_product(productos_csv: Path, producto_id: str) -> Optional[Dict[str, str]]:
-    for p in read_all(productos_csv):
-        normalized = _normalize_product_row(p)
-        if normalized.get("producto_id") == producto_id and normalized.get("activo", "1") == "1":
-            return normalized
-    return None
+    cache_key = _file_cache_key(productos_csv)
+    cached = _PRODUCTS_CACHE.get(cache_key)
+    if cached is None:
+        get_products(productos_csv)
+        cached = _PRODUCTS_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    product = cached["by_id"].get(producto_id)
+    return dict(product) if product else None
 
 def create_product(
     productos_csv: Path,
@@ -277,18 +306,36 @@ def create_product(
     return pid
 
 def update_product_fields(productos_csv: Path, backup_dir: Path, producto_id: str, fields: Dict[str, str]) -> None:
+    update_many_product_fields(
+        productos_csv,
+        backup_dir=backup_dir,
+        updates={producto_id: fields},
+    )
+
+
+def update_many_product_fields(
+    productos_csv: Path,
+    backup_dir: Path,
+    updates: Dict[str, Dict[str, str]],
+) -> None:
+    if not updates:
+        return
+
     rows = read_all(productos_csv)
     changed = False
     for r in rows:
-        if r.get("producto_id") == producto_id:
+        product_id = (r.get("producto_id") or "").strip()
+        fields = updates.get(product_id)
+        if fields:
+            row_changed = False
             for k, v in fields.items():
-                if k in r:
+                if k in r and r.get(k) != v:
                     r[k] = v
-                    changed = True
-            if changed:
+                    row_changed = True
+            if row_changed:
                 normalized = _normalize_product_row(r)
                 r.update({key: normalized.get(key, "") for key in PRODUCT_HEADERS})
-            break
+                changed = True
     if changed:
         write_all_atomic(productos_csv, rows, PRODUCT_HEADERS, backup_dir=backup_dir)
 
@@ -297,38 +344,51 @@ def calc_stock_by_product(movs_csv: Path) -> Dict[str, float]:
     Calcula stock desde movimientos.
     NOTA: para stock infinito lo gestionamos fuera (en la vista), no aquí.
     """
-    stock: Dict[str, float] = {}
-    for m in read_all(movs_csv):
-        pid = m.get("producto_id", "")
-        tipo = (m.get("tipo") or "").strip().upper()
-        try:
-            qty = float(m.get("cantidad") or 0)
-        except ValueError:
-            qty = 0.0
+    cache_key = _file_cache_key(movs_csv)
+    cached = _STOCK_CACHE.get(cache_key)
+    if cached is None:
+        stock: Dict[str, float] = {}
+        for m in read_all(movs_csv):
+            pid = m.get("producto_id", "")
+            tipo = (m.get("tipo") or "").strip().upper()
+            try:
+                qty = float(m.get("cantidad") or 0)
+            except ValueError:
+                qty = 0.0
 
-        if tipo == "ENTRADA":
-            stock[pid] = stock.get(pid, 0.0) + qty
-        elif tipo == "SALIDA":
-            stock[pid] = stock.get(pid, 0.0) - qty
-        elif tipo == "AJUSTE":
-            stock[pid] = stock.get(pid, 0.0) + qty
-    return stock
+            if tipo == "ENTRADA":
+                stock[pid] = stock.get(pid, 0.0) + qty
+            elif tipo == "SALIDA":
+                stock[pid] = stock.get(pid, 0.0) - qty
+            elif tipo == "AJUSTE":
+                stock[pid] = stock.get(pid, 0.0) + qty
+        _STOCK_CACHE.clear()
+        _STOCK_CACHE[cache_key] = stock
+        cached = stock
+    return cached
 
 def last_purchases_for_product(movs_csv: Path, producto_id: str, limit: int = 200) -> List[Dict[str, str]]:
     """
     Devuelve ENTRADAS del producto, ordenadas de más reciente a más antigua.
     """
-    rows = []
-    for m in read_all(movs_csv):
-        if m.get("producto_id") != producto_id:
-            continue
-        tipo = (m.get("tipo") or "").strip().upper()
-        origen = (m.get("origen") or "").strip().upper()
-        if origen != "COMPRA" or tipo not in {"ENTRADA", "INFO"}:
-            continue
-        rows.append(m)
-    rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
-    return rows[:limit]
+    cache_key = _file_cache_key(movs_csv)
+    cached = _PURCHASES_CACHE.get(cache_key)
+    if cached is None:
+        by_product: Dict[str, List[Dict[str, str]]] = {}
+        for m in read_all(movs_csv):
+            pid = m.get("producto_id", "")
+            tipo = (m.get("tipo") or "").strip().upper()
+            origen = (m.get("origen") or "").strip().upper()
+            if origen != "COMPRA" or tipo not in {"ENTRADA", "INFO"}:
+                continue
+            by_product.setdefault(pid, []).append(m)
+        for rows in by_product.values():
+            rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+        _PURCHASES_CACHE.clear()
+        _PURCHASES_CACHE[cache_key] = by_product
+        cached = by_product
+    rows = cached.get(producto_id, [])
+    return rows[:limit] if limit > 0 else list(rows)
 
 def add_adjustment(movs_csv: Path, producto_id: str, delta: float, nota: str = "Ajuste manual") -> None:
     row = {

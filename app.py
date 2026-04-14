@@ -4,7 +4,9 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from datetime import date, datetime, timedelta
 import csv
 import io
+import math
 import os
+import unicodedata
 import config
 
 from services.csv_store import ensure_csv, read_all
@@ -49,7 +51,7 @@ from services.inventory import (
     ensure_demo_products,
     get_products, find_product,
     calc_stock_by_product, last_purchases_for_product,
-    update_product_fields, set_stock_to_value,
+    update_product_fields, update_many_product_fields, set_stock_to_value,
     create_product, add_purchase_entries,
     product_is_fractionable, product_fraction_count, product_sale_unit,
     sale_quantity_to_stock_quantity, stock_quantity_to_sale_quantity,
@@ -90,7 +92,27 @@ def create_app() -> Flask:
     if os.getenv("LOAD_DEMO_DATA", "0") == "1":
         ensure_demo_products(config.CSV_PRODUCTOS)
 
-    def refresh_cash_analysis_storage() -> dict[str, object]:
+    def refresh_cash_analysis_storage(force: bool = False) -> dict[str, object]:
+        source_paths = (
+            config.CSV_CAJA,
+            config.CSV_FACTURAS,
+            config.CSV_MOVS,
+            config.CSV_GASTOS_LIBRES,
+            config.CSV_LOGS,
+        )
+        output_paths = (
+            config.CSV_CAJA_MOVIMIENTOS,
+            config.CSV_CAJA_HISTORIAL,
+        )
+
+        if not force and all(path.exists() for path in output_paths):
+            latest_source_mtime = max(path.stat().st_mtime_ns for path in source_paths if path.exists())
+            earliest_output_mtime = min(path.stat().st_mtime_ns for path in output_paths)
+            if earliest_output_mtime >= latest_source_mtime:
+                return {
+                    "cached": True,
+                }
+
         return rebuild_cash_analysis_files(
             cashbox_csv=config.CSV_CAJA,
             invoices_csv=config.CSV_FACTURAS,
@@ -100,8 +122,6 @@ def create_app() -> Flask:
             cash_movements_csv=config.CSV_CAJA_MOVIMIENTOS,
             cash_daily_csv=config.CSV_CAJA_HISTORIAL,
         )
-
-    refresh_cash_analysis_storage()
 
     def require_login():
         if not session.get("user"):
@@ -136,6 +156,7 @@ def create_app() -> Flask:
         q = (request.form.get("f_q") or request.args.get("q") or "").strip()
         g = (request.form.get("f_g") or request.args.get("g") or "").strip()
         low = "1" if (request.form.get("f_low") or request.args.get("low")) == "1" else "0"
+        page = parse_positive_int(request.form.get("f_page") or request.args.get("page"), 1)
 
         params = {}
         if producto_id:
@@ -146,6 +167,8 @@ def create_app() -> Flask:
             params["g"] = g
         if low == "1":
             params["low"] = "1"
+        if page > 1:
+            params["page"] = page
 
         return redirect(url_for("inventario", **params))
 
@@ -192,6 +215,70 @@ def create_app() -> Flask:
         if abs(value - int(value)) < 1e-9:
             return str(int(value))
         return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    def normalize_text_search(raw: object) -> str:
+        text = unicodedata.normalize("NFD", str(raw or ""))
+        text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+        return "".join(text.lower().split())
+
+    def parse_positive_int(raw: str | None, default: int, *, minimum: int = 1, maximum: int | None = None) -> int:
+        try:
+            value = int(str(raw or "").strip())
+        except ValueError:
+            value = default
+        if value < minimum:
+            value = minimum
+        if maximum is not None and value > maximum:
+            value = maximum
+        return value
+
+    def paginate_rows(
+        rows: list[dict[str, object]],
+        *,
+        per_page: int,
+        endpoint: str,
+        current_filters: dict[str, str],
+        extra_params: dict[str, object] | None = None,
+    ) -> tuple[list[dict[str, object]], dict[str, object]]:
+        total = len(rows)
+        page_count = max(1, math.ceil(total / per_page)) if per_page > 0 else 1
+        current_page = parse_positive_int(request.args.get("page"), 1, maximum=page_count)
+        start = 0 if per_page <= 0 else (current_page - 1) * per_page
+        end = None if per_page <= 0 else start + per_page
+        page_rows = rows[start:end]
+
+        def page_url(page: int) -> str:
+            params: dict[str, object] = {}
+            for key, value in current_filters.items():
+                if key == "low":
+                    if value == "1":
+                        params[key] = value
+                    continue
+                if value:
+                    params[key] = value
+            if page > 1:
+                params["page"] = page
+            if extra_params:
+                for key, value in extra_params.items():
+                    if value not in (None, ""):
+                        params[key] = value
+            return url_for(endpoint, **params)
+
+        shown_from = start + 1 if total and page_rows else 0
+        shown_to = start + len(page_rows)
+        return page_rows, {
+            "page": current_page,
+            "page_count": page_count,
+            "per_page": per_page,
+            "total": total,
+            "shown_from": shown_from,
+            "shown_to": shown_to,
+            "has_prev": current_page > 1,
+            "has_next": current_page < page_count,
+            "prev_url": page_url(current_page - 1) if current_page > 1 else "",
+            "next_url": page_url(current_page + 1) if current_page < page_count else "",
+            "current_url": page_url(current_page),
+        }
 
     def stock_unit_label(product: dict[str, str]) -> str:
         return (product.get("unidad") or "ud").strip() or "ud"
@@ -291,6 +378,9 @@ def create_app() -> Flask:
         key = config_section_key(section)
         return redirect(url_for(endpoint_by_section[key], **values))
 
+    def page_limit(normal: int, low_resource: int) -> int:
+        return low_resource if config.LOW_RESOURCE_MODE else normal
+
     def config_shortcuts(active_section: str) -> list[dict[str, str | bool]]:
         items = [
             ("caja", "Configurar saldo de caja", url_for("configuracion_caja")),
@@ -313,7 +403,7 @@ def create_app() -> Flask:
         return redirect(url_for("gestion_usuarios"))
 
     def admin_logs_context() -> dict[str, object]:
-        all_logs = list_logs(config.CSV_LOGS, limit=2000)
+        all_logs = list_logs(config.CSV_LOGS, limit=page_limit(2000, 500))
         logs = list(all_logs)
         current_q = (request.args.get("q") or "").strip()
         current_user = (request.args.get("user") or "").strip()
@@ -373,9 +463,12 @@ def create_app() -> Flask:
             },
         }
 
-    def inventory_snapshot() -> dict[str, int]:
-        prods = get_products(config.CSV_PRODUCTOS)
-        stock_map = calc_stock_by_product(config.CSV_MOVS)
+    def inventory_snapshot(
+        prods: list[dict[str, str]] | None = None,
+        stock_map: dict[str, float] | None = None,
+    ) -> dict[str, int]:
+        prods = prods if prods is not None else get_products(config.CSV_PRODUCTOS)
+        stock_map = stock_map if stock_map is not None else calc_stock_by_product(config.CSV_MOVS)
         low_stock = 0
         infinite = 0
         groups: set[str] = set()
@@ -1339,6 +1432,7 @@ def create_app() -> Flask:
         return {
             "shell_nav_items": nav_items,
             "today_label": date.today().strftime("%d/%m/%Y"),
+            "low_resource_mode": config.LOW_RESOURCE_MODE,
         }
 
     def print_invoice_ticket(factura_id: str) -> None:
@@ -1363,6 +1457,8 @@ def create_app() -> Flask:
     def audit_every_request(response):
         endpoint = (request.endpoint or "").strip()
         if endpoint == "static" or request.path.startswith("/static/"):
+            return response
+        if request.method == "GET" and response.status_code < 400 and not config.AUDIT_READ_REQUESTS:
             return response
 
         user = (getattr(g, "audit_user", "") or session.get("user", "") or "anon").strip()
@@ -1584,7 +1680,6 @@ def create_app() -> Flask:
             "AJUSTE CAJA",
             f"Saldo {previous_balance:.2f} -> {new_balance:.2f}. Nota: {note or '-'}",
         )
-        refresh_cash_analysis_storage()
         flash("Saldo de caja actualizado ✅")
         return redirect_to_config("caja")
 
@@ -1598,10 +1693,11 @@ def create_app() -> Flask:
         if r:
             return r
 
-        snapshot = inventory_snapshot()
+        products_all = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
+        snapshot = inventory_snapshot(products_all, stock_map)
         products = [
-            p for p in get_products(config.CSV_PRODUCTOS)
+            p for p in products_all
             if p.get("stock_infinito", "0") != "1"
         ]
         attention_products = []
@@ -1648,7 +1744,7 @@ def create_app() -> Flask:
 
         product_names = {
             p.get("producto_id", ""): p.get("nombre", "")
-            for p in get_products(config.CSV_PRODUCTOS)
+            for p in products_all
         }
         tickets, _ = list_purchase_history(
             config.CSV_MOVS,
@@ -1919,32 +2015,34 @@ def create_app() -> Flask:
         prods = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
-        # grupos únicos para el desplegable
         groups_map = {}
-        for p in prods:
-            g = (p.get("grupo") or "Otros").strip()
-            e = (p.get("grupo_emoji") or "📦").strip()
-            groups_map[g] = e
-        group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
-
-        # tabla/listado (incluye bandera bajo mínimo y stock infinito)
         rows = []
+        low_stock_count = 0
+        infinite_stock_count = 0
         for p in prods:
+            group_name = (p.get("grupo") or "Otros").strip() or "Otros"
+            group_emoji = (p.get("grupo_emoji") or "📦").strip() or "📦"
+            groups_map[group_name] = group_emoji
+
             pid = p["producto_id"]
             infinito = (p.get("stock_infinito", "0") == "1")
-
             stock = stock_map.get(pid, 0.0)
             stock_min = float(p.get("stock_minimo") or 0.0)
             bajo_min = (False if infinito else (stock < stock_min))
             stock_display_main, stock_display_meta = stock_display_parts(p, None if infinito else stock)
+
+            if infinito:
+                infinite_stock_count += 1
+            elif bajo_min:
+                low_stock_count += 1
 
             rows.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
                 "unidad": stock_unit_label(p),
                 "unidad_venta": sale_unit_label(p),
-                "grupo": p.get("grupo", "Otros"),
-                "grupo_emoji": p.get("grupo_emoji", "📦"),
+                "grupo": group_name,
+                "grupo_emoji": group_emoji,
                 "stock_infinito": "1" if infinito else "0",
                 "fraccionable": "1" if product_is_fractionable(p) else "0",
                 "fracciones_por_unidad": format_compact_number(product_fraction_count(p)),
@@ -1956,6 +2054,46 @@ def create_app() -> Flask:
                 "bajo_minimo": "1" if bajo_min else "0",
             })
         rows.sort(key=lambda x: x["nombre"].lower())
+        group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+
+        if config.LOW_RESOURCE_MODE:
+            query = normalize_text_search(current_filters["q"])
+            group_name = current_filters["g"]
+            low_only = current_filters["low"] == "1"
+            filtered_rows = [
+                row for row in rows
+                if (not query or query in normalize_text_search(row["nombre"]))
+                and (not group_name or row["grupo"] == group_name)
+                and (not low_only or row["bajo_minimo"] == "1")
+            ]
+            visible_rows, product_browser = paginate_rows(
+                filtered_rows,
+                per_page=24,
+                endpoint="inventario",
+                current_filters=current_filters,
+            )
+        else:
+            visible_rows = rows
+            product_browser = {
+                "page": 1,
+                "page_count": 1,
+                "per_page": len(rows),
+                "total": len(rows),
+                "shown_from": 1 if rows else 0,
+                "shown_to": len(rows),
+                "has_prev": False,
+                "has_next": False,
+                "prev_url": "",
+                "next_url": "",
+                "current_url": url_for(
+                    "inventario",
+                    **{
+                        key: value
+                        for key, value in current_filters.items()
+                        if value and not (key == "low" and value != "1")
+                    },
+                ),
+            }
 
         selected = find_product(config.CSV_PRODUCTOS, producto_id) if producto_id else None
 
@@ -1967,7 +2105,11 @@ def create_app() -> Flask:
             sel_inf = (selected.get("stock_infinito", "0") == "1")
             selected_stock = None if sel_inf else stock_map.get(producto_id, 0.0)
             selected_sale_stock = None if selected_stock is None else stock_quantity_to_sale_quantity(selected, selected_stock)
-            selected_purchases = last_purchases_for_product(config.CSV_MOVS, producto_id, limit=300)
+            selected_purchases = last_purchases_for_product(
+                config.CSV_MOVS,
+                producto_id,
+                limit=page_limit(300, 80),
+            )
             latest_purchase_price = 0.0
             latest_purchase_date = ""
             for movement in selected_purchases:
@@ -1995,15 +2137,15 @@ def create_app() -> Flask:
 
         inventory_summary = {
             "total_products": len(rows),
-            "low_stock": sum(1 for row in rows if row["bajo_minimo"] == "1"),
-            "infinite_stock": sum(1 for row in rows if row["stock_infinito"] == "1"),
+            "low_stock": low_stock_count,
+            "infinite_stock": infinite_stock_count,
             "groups": len(group_options),
         }
 
         return render_template(
             "inventario.html",
             title="Inventario",
-            products_table=rows,
+            products_table=visible_rows,
             selected=selected,
             selected_stock=selected_stock,
             selected_sale_stock=selected_sale_stock,
@@ -2012,6 +2154,7 @@ def create_app() -> Flask:
             group_options=group_options,
             current_filters=current_filters,
             inventory_summary=inventory_summary,
+            product_browser=product_browser,
         )
 
     @app.post("/inventario/nuevo_producto")
@@ -2210,8 +2353,7 @@ def create_app() -> Flask:
             return r
 
         current_filters = list_filters_from_request()
-        prods = get_products(config.CSV_PRODUCTOS)
-        prods.sort(key=lambda p: (p.get("nombre") or "").lower())
+        prods = sorted(get_products(config.CSV_PRODUCTOS), key=lambda p: (p.get("nombre") or "").lower())
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
         product_options = []
@@ -2252,11 +2394,18 @@ def create_app() -> Flask:
             elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
                 low_stock += 1
         group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+        query = normalize_text_search(current_filters["q"])
+        group_name = current_filters["g"]
+        filtered_product_options = [
+            row for row in product_options
+            if (not query or query in normalize_text_search(row["nombre"]))
+            and (not group_name or row["grupo"] == group_name)
+        ]
 
         return render_template(
             "factura_nueva.html",
             title="Nueva factura",
-            products=product_options,
+            products=filtered_product_options,
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
@@ -2375,7 +2524,6 @@ def create_app() -> Flask:
             if not wants_json:
                 flash(print_warning)
 
-        refresh_cash_analysis_storage()
         success_message = f"Factura registrada ✅ ({len(lines)} líneas, total {total:.2f} €, ref: {factura_id})"
         if wants_json:
             return jsonify({
@@ -2396,18 +2544,10 @@ def create_app() -> Flask:
         if r:
             return r
 
-        invoices = list_invoices(config.CSV_FACTURAS, limit=400)
-        raw_lines = list_invoice_lines(config.CSV_FACTURA_LINEAS)
+        invoices = list_invoices(config.CSV_FACTURAS, limit=page_limit(400, 120))
         current_q = (request.args.get("q") or "").strip()
         current_from = (request.args.get("from") or "").strip()
         current_to = (request.args.get("to") or "").strip()
-
-        lines_map: dict[str, list[dict[str, str]]] = {}
-        for line in raw_lines:
-            fid = (line.get("factura_id") or "").strip()
-            if not fid:
-                continue
-            lines_map.setdefault(fid, []).append(line)
 
         query = current_q.lower()
         if query:
@@ -2430,6 +2570,18 @@ def create_app() -> Flask:
                 row for row in invoices
                 if (row.get("usuario") or "").strip().lower() == me
             ]
+
+        invoice_ids = {
+            (row.get("factura_id") or "").strip()
+            for row in invoices
+            if (row.get("factura_id") or "").strip()
+        }
+        lines_map: dict[str, list[dict[str, str]]] = {}
+        if invoice_ids:
+            for line in list_invoice_lines(config.CSV_FACTURA_LINEAS):
+                fid = (line.get("factura_id") or "").strip()
+                if fid in invoice_ids:
+                    lines_map.setdefault(fid, []).append(line)
 
         history_summary = {
             "count": len(invoices),
@@ -2542,7 +2694,7 @@ def create_app() -> Flask:
         tickets, lines_map = list_purchase_history(
             config.CSV_MOVS,
             product_names=product_names,
-            limit=500,
+            limit=page_limit(500, 150),
         )
         current_q = (request.args.get("q") or "").strip()
         current_from = (request.args.get("from") or "").strip()
@@ -2669,8 +2821,7 @@ def create_app() -> Flask:
             return r
 
         current_filters = list_filters_from_request()
-        prods = get_products(config.CSV_PRODUCTOS)
-        prods.sort(key=lambda p: (p.get("nombre") or "").lower())
+        prods = sorted(get_products(config.CSV_PRODUCTOS), key=lambda p: (p.get("nombre") or "").lower())
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
         product_options = []
@@ -2711,11 +2862,18 @@ def create_app() -> Flask:
             elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
                 low_stock += 1
         group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+        query = normalize_text_search(current_filters["q"])
+        group_name = current_filters["g"]
+        filtered_product_options = [
+            row for row in product_options
+            if (not query or query in normalize_text_search(row["nombre"]))
+            and (not group_name or row["grupo"] == group_name)
+        ]
 
         return render_template(
             "compra_nueva.html",
             title="Nueva compra",
-            products=product_options,
+            products=filtered_product_options,
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
@@ -2849,14 +3007,14 @@ def create_app() -> Flask:
                 updated_by=session.get("user", ""),
                 note=f"Compra {ref_id}",
             )
-        for producto_id, new_sale_price in sale_price_updates.items():
-            update_product_fields(
-                config.CSV_PRODUCTOS,
-                backup_dir=config.BACKUP_DIR,
-                producto_id=producto_id,
-                fields={"precio_unitario": new_sale_price},
-            )
-        refresh_cash_analysis_storage()
+        update_many_product_fields(
+            config.CSV_PRODUCTOS,
+            backup_dir=config.BACKUP_DIR,
+            updates={
+                producto_id: {"precio_unitario": new_sale_price}
+                for producto_id, new_sale_price in sale_price_updates.items()
+            },
+        )
         success_message = f"Compra registrada ✅ ({len(lines)} líneas, ref: {ref_id})"
         if wants_json:
             return jsonify({
@@ -2938,7 +3096,6 @@ def create_app() -> Flask:
             updated_by=session.get("user", ""),
             note=f"Gasto libre {expense_id}",
         )
-        refresh_cash_analysis_storage()
         success_message = f"Gasto libre registrado ✅ ({total:.2f} €, ref: {expense_id})"
         if wants_json:
             return jsonify({
@@ -2957,7 +3114,7 @@ def create_app() -> Flask:
         if r:
             return r
 
-        expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=500)
+        expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=page_limit(500, 150))
         current_q = (request.args.get("q") or "").strip()
         current_from = (request.args.get("from") or "").strip()
         current_to = (request.args.get("to") or "").strip()

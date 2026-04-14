@@ -8,6 +8,35 @@
           <h2 class="section-heading">Productos</h2>
         </div>
 
+        {% if low_resource_mode %}
+        <form class="inv-filters" method="get" action="{{ url_for('inventario') }}" id="inventoryFiltersForm">
+          <div>
+            <label class="label" for="searchBox">Buscar producto</label>
+            <input id="searchBox" name="q" class="input" placeholder="Escribe nombre del producto" value="{{ current_filters.q }}">
+          </div>
+
+          <div class="inv-filters-right">
+            <div>
+              <label class="label" for="groupFilter">Grupo</label>
+              <select id="groupFilter" name="g">
+                <option value="">(Todos)</option>
+                {% for g, e in group_options %}
+                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <label class="inv-check">
+              <input id="onlyLow" name="low" type="checkbox" value="1" {% if current_filters.low == "1" %}checked{% endif %}>
+              <span>Mostrar solo bajo reserva</span>
+            </label>
+
+            <div class="actions">
+              <a class="btn btn-secondary btn-small" href="{{ url_for('inventario') }}">Limpiar</a>
+            </div>
+          </div>
+        </form>
+        {% else %}
         <div class="inv-filters">
           <div>
             <label class="label" for="searchBox">Buscar producto</label>
@@ -31,6 +60,7 @@
             </label>
           </div>
         </div>
+        {% endif %}
 
         <div class="inv-scrollbox" id="listBox">
           <table class="table">
@@ -44,7 +74,7 @@
               {% for r in products_table %}
                 <tr
                   class="row-click {% if selected and selected.producto_id == r.producto_id %}row-selected{% endif %}"
-                  data-href="{{ url_for('inventario', producto_id=r.producto_id) }}"
+                  data-href="{{ url_for('inventario', producto_id=r.producto_id, q=current_filters.q or None, g=current_filters.g or None, low='1' if current_filters.low == '1' else None, page=product_browser.page if low_resource_mode and product_browser.page > 1 else None) }}"
                   data-name="{{ r.nombre }}"
                   data-group="{{ r.grupo }}"
                   data-low="{{ r.bajo_minimo }}"
@@ -66,7 +96,7 @@
                         <span class="product-state state-ok">OK</span>
                       {% endif %}
                     </div>
-                    {% if r.fraccionable == "1" %}
+                    {% if not low_resource_mode and r.fraccionable == "1" %}
                       <div class="help product-subtext">Compra en {{ r.unidad }} · Venta en {{ r.unidad_venta }} · {{ r.fraccion_info }}</div>
                     {% endif %}
                   </td>
@@ -76,7 +106,7 @@
                       ♾️
                     {% else %}
                       <div class="stock-display-main">{{ r.stock_display_main }}</div>
-                      {% if r.stock_display_meta %}
+                      {% if not low_resource_mode and r.stock_display_meta %}
                         <div class="stock-display-meta">{{ r.stock_display_meta }}</div>
                       {% endif %}
                     {% endif %}
@@ -88,6 +118,30 @@
 
           <div class="empty inventory-no-results" id="inventoryNoResults" hidden>No hay productos que coincidan con los filtros actuales.</div>
         </div>
+        {% if low_resource_mode %}
+          <div class="help">
+            {% if product_browser.total %}
+              Mostrando {{ product_browser.shown_from }}-{{ product_browser.shown_to }} de {{ product_browser.total }} productos.
+            {% else %}
+              No hay productos que coincidan con los filtros actuales.
+            {% endif %}
+          </div>
+          {% if product_browser.page_count > 1 %}
+          <div class="actions">
+            {% if product_browser.has_prev %}
+              <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}">Anterior</a>
+            {% else %}
+              <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+            {% endif %}
+            <span class="help">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
+            {% if product_browser.has_next %}
+              <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}">Siguiente</a>
+            {% else %}
+              <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+            {% endif %}
+          </div>
+          {% endif %}
+        {% endif %}
       </div>
     </section>
 
@@ -117,6 +171,7 @@
               <input type="hidden" name="f_q" value="{{ current_filters.q }}">
               <input type="hidden" name="f_g" value="{{ current_filters.g }}">
               <input type="hidden" name="f_low" value="{{ current_filters.low }}">
+              <input type="hidden" name="f_page" value="{{ product_browser.page }}">
               <label class="label">Nombre</label>
               <input class="input js-live-field" name="nombre" data-rule="required" required>
 
@@ -179,6 +234,9 @@
                   </div>
                   <div>
                     <label class="label">Emoji del grupo</label>
+                    {% if low_resource_mode %}
+                    <input class="input js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group" placeholder="Ej: 🥬">
+                    {% else %}
                     <input type="hidden" class="js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group">
                     <div class="emoji-picker" id="groupEmojiPicker">
                       <button class="input emoji-picker-trigger" type="button" id="groupEmojiTrigger" aria-expanded="false" aria-controls="groupEmojiMenu">
@@ -188,6 +246,7 @@
                         <div class="emoji-picker-scroll" id="groupEmojiScroll"></div>
                       </div>
                     </div>
+                    {% endif %}
                   </div>
                 </div>
               </div>
@@ -219,6 +278,7 @@
                     <input type="hidden" name="f_q" value="{{ current_filters.q }}">
                     <input type="hidden" name="f_g" value="{{ current_filters.g }}">
                     <input type="hidden" name="f_low" value="{{ current_filters.low }}">
+                    <input type="hidden" name="f_page" value="{{ product_browser.page }}">
                     <div class="grid-2">
                       <div>
                         <label class="label">Nombre</label>
@@ -375,6 +435,9 @@
   </div>
 </div>
 
+{% if low_resource_mode %}
+  {% include "_inventario_low_script.html" %}
+{% else %}
 <script>
   function normalizeText(s) {
     return (s || "")
@@ -383,6 +446,14 @@
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, "")
       .toLowerCase();
+  }
+
+  function debounce(fn, delay) {
+    let timerId = 0;
+    return (...args) => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => fn(...args), delay);
+    };
   }
 
   function toggleNewProduct(forceShow = null) {
@@ -413,6 +484,10 @@
   const visibleProductsCount = document.getElementById("visibleProductsCount");
   const noResultsBox = document.getElementById("inventoryNoResults");
   const clearFiltersBtn = document.getElementById("inventoryClearFilters");
+  const applyFiltersDebounced = debounce(() => {
+    applyFilters();
+    syncFilterState();
+  }, 120);
 
   function syncFilterState() {
     const next = new URL(window.location.href);
@@ -446,15 +521,21 @@
     window.location.href = next.pathname + next.search;
   }
 
-  document.querySelectorAll("tr[data-href]").forEach((tr) => {
-    tr.addEventListener("click", () => navigateToProductRow(tr));
-    tr.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        navigateToProductRow(tr);
+  const productsTbody = document.getElementById("productsTbody");
+  if (productsTbody) {
+    productsTbody.addEventListener("click", (event) => {
+      const row = event.target.closest("tr[data-href]");
+      if (row) navigateToProductRow(row);
+    });
+    productsTbody.addEventListener("keydown", (event) => {
+      const row = event.target.closest("tr[data-href]");
+      if (!row) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        navigateToProductRow(row);
       }
     });
-  });
+  }
 
   function applyFilters() {
     const q = normalizeText(searchBox.value);
@@ -481,10 +562,7 @@
     noResultsBox.hidden = visible !== 0;
   }
 
-  searchBox.addEventListener("input", () => {
-    applyFilters();
-    syncFilterState();
-  });
+  searchBox.addEventListener("input", applyFiltersDebounced);
   groupFilter.addEventListener("change", () => {
     applyFilters();
     syncFilterState();
@@ -540,6 +618,7 @@
   const groupEmojiValue = document.getElementById("groupEmojiValue");
   const groupEmojiMenu = document.getElementById("groupEmojiMenu");
   const groupEmojiScroll = document.getElementById("groupEmojiScroll");
+  let emojiPickerRendered = false;
   const EMOJI_GROUPS = [
     { color: "Rojo", emojis: ["🍎", "🍓", "🍒", "🍅", "🌹", "🌺", "🥩", "🎈", "🚗", "📕", "🎒", "🎸", "🔴", "❤", "💋", "🏓", "🥊", "🦀"] },
     { color: "Naranja", emojis: ["🍊", "🍑", "🥕", "🧅", "🦊", "🐅", "🦁", "🏀", "🏺", "🥐", "📙", "🔶", "🍂", "🎃", "🦐", "🎻"] },
@@ -591,6 +670,13 @@
       section.appendChild(grid);
       groupEmojiScroll.appendChild(section);
     });
+  }
+
+  function ensureEmojiPickerRendered() {
+    if (emojiPickerRendered) return;
+    renderEmojiPicker();
+    updateEmojiPickerUI();
+    emojiPickerRendered = true;
   }
 
   function syncGroupUI() {
@@ -659,6 +745,7 @@
 
   function openEmojiPicker() {
     if (!groupEmojiMenu || !groupEmojiTrigger) return;
+    ensureEmojiPickerRendered();
     const triggerRect = groupEmojiTrigger.getBoundingClientRect();
     const margin = 18;
     const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
@@ -698,7 +785,6 @@
     closeEmojiPicker();
   });
 
-  renderEmojiPicker();
   updateEmojiPickerUI();
 
   const newProdForm = document.getElementById("newProdForm");
@@ -1004,4 +1090,5 @@
     setDetailEditMode(false);
   }
 </script>
+{% endif %}
 {% endblock %}

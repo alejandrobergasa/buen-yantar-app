@@ -60,7 +60,7 @@
                     <span class="product-state state-ok">OK</span>
                   {% endif %}
                 </div>
-                {% if p.fraccionable == "1" %}
+                {% if not low_resource_mode and p.fraccionable == "1" %}
                   <div class="help product-subtext">Compra en {{ p.unidad_stock }} · Venta en {{ p.unidad_venta }} · {{ p.fraccion_info }}</div>
                 {% endif %}
               </td>
@@ -69,7 +69,7 @@
                   ♾️
                 {% else %}
                   <div class="stock-display-main">{{ p.stock_display_main }}</div>
-                  {% if p.stock_display_meta %}
+                  {% if not low_resource_mode and p.stock_display_meta %}
                     <div class="stock-display-meta">{{ p.stock_display_meta }}</div>
                   {% endif %}
                 {% endif %}
@@ -157,6 +157,7 @@
   </tr>
 </template>
 
+{% if not low_resource_mode %}
 <dialog class="shopping-dialog purchase-confirm-dialog" id="purchaseConfirmDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -194,8 +195,14 @@
     </div>
   </div>
 </dialog>
+{% endif %}
 
+{% if low_resource_mode %}
+  {% include "_compra_nueva_low_script.html" %}
+{% else %}
 <script>
+  const lowResourceMode = {{ "true" if low_resource_mode else "false" }};
+
   function normalizeText(s) {
     return (s || "")
       .toString()
@@ -219,6 +226,14 @@
     }
     const n = Number(t);
     return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function debounce(fn, delay) {
+    let timerId = 0;
+    return (...args) => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => fn(...args), delay);
+    };
   }
 
   function setFieldState(el, state) {
@@ -278,6 +293,12 @@
   const draftKey = "buen-yantar:purchase-draft:v1";
   const toastKey = "buen-yantar:toast";
   let purchaseSubmitting = false;
+  const scheduleDraftSave = debounce(saveDraft, 300);
+  const scheduleProductFilter = debounce(() => {
+    applyProductFilters();
+    syncFilterState();
+    scheduleDraftSave();
+  }, 120);
 
   function productDataFromRow(sourceRow) {
     return {
@@ -327,6 +348,7 @@
   }
 
   function hasDraftContent() {
+    if (lowResourceMode) return false;
     return (
       selectedById.size > 0
       || (searchBox.value || "").trim() !== ""
@@ -336,7 +358,7 @@
   }
 
   function updateDraftStatus(state, text) {
-    if (!draftStatus) return;
+    if (!draftStatus || lowResourceMode) return;
     draftStatus.dataset.state = state;
     draftStatus.textContent = text;
   }
@@ -363,6 +385,7 @@
   }
 
   function saveDraft() {
+    if (lowResourceMode) return;
     if (!hasDraftContent()) {
       sessionStorage.removeItem(draftKey);
       updateDraftStatus("empty", "Borrador vacio");
@@ -373,6 +396,7 @@
   }
 
   function clearDraft() {
+    if (lowResourceMode) return;
     sessionStorage.removeItem(draftKey);
     updateDraftStatus("empty", "Borrador vacio");
   }
@@ -451,6 +475,10 @@
   }
 
   function restoreDraft() {
+    if (lowResourceMode) {
+      updateDraftStatus("empty", "Modo rapido activo");
+      return;
+    }
     const raw = sessionStorage.getItem(draftKey);
     if (!raw) {
       updateDraftStatus("empty", "Borrador vacio");
@@ -560,6 +588,7 @@
     syncSelectedState();
   }
 
+  {% if not low_resource_mode %}
   function purchaseRowsSnapshot() {
     return Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => {
       const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
@@ -740,6 +769,7 @@
       confirmPurchaseSubmit.textContent = originalText;
     }
   }
+  {% endif %}
 
   function updateSaleRecommendation(row) {
     const recommendedNode = row.querySelector(".purchase-sale-recommended");
@@ -765,7 +795,6 @@
     const unitPrice = row.querySelector('input[name="precio_compra[]"]');
     const subtotal = row.querySelector('input[name="subtotal_compra[]"]');
     const salePrice = row.querySelector('input[name="precio_venta_actual[]"]');
-    const note = row.querySelector('input[name="nota_linea[]"]');
     const removeBtn = row.querySelector(".purchase-remove");
     const pid = row.querySelector(".ticket-product-id").value;
 
@@ -777,11 +806,8 @@
         } else {
           refreshSummary();
         }
-        saveDraft();
       });
     });
-    note.addEventListener("input", saveDraft);
-
     removeBtn.addEventListener("click", () => {
       selectedById.delete(pid);
       row.remove();
@@ -823,23 +849,27 @@
     saveDraft();
   }
 
-  productRows.forEach((tr) => {
-    tr.addEventListener("click", () => addProductToTicket(tr));
-    tr.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        addProductToTicket(tr);
+  const purchaseProductsTbody = document.getElementById("productsPickTbody");
+  if (purchaseProductsTbody) {
+    purchaseProductsTbody.addEventListener("click", (event) => {
+      const row = event.target.closest(".purchase-product-row");
+      if (row) addProductToTicket(row);
+    });
+    purchaseProductsTbody.addEventListener("keydown", (event) => {
+      const row = event.target.closest(".purchase-product-row");
+      if (!row) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        addProductToTicket(row);
       }
     });
-  });
+  }
 
-  searchBox.addEventListener("input", () => {
-    applyProductFilters();
-    syncFilterState();
-  });
+  searchBox.addEventListener("input", scheduleProductFilter);
   groupFilter.addEventListener("change", () => {
     applyProductFilters();
     syncFilterState();
+    saveDraft();
   });
   if (clearFiltersBtn) {
     clearFiltersBtn.addEventListener("click", () => {
@@ -853,7 +883,7 @@
   if (clearLinesBtn) {
     clearLinesBtn.addEventListener("click", clearTicket);
   }
-  purchaseForm.addEventListener("input", saveDraft);
+  purchaseForm.addEventListener("input", scheduleDraftSave);
   purchaseForm.addEventListener("change", saveDraft);
 
   document.addEventListener("keydown", (e) => {
@@ -879,6 +909,7 @@
   refreshEmptyState();
   refreshSummary();
 
+  {% if not low_resource_mode %}
   if (closePurchaseConfirmDialog && purchaseConfirmDialog) {
     closePurchaseConfirmDialog.addEventListener("click", () => purchaseConfirmDialog.close());
     purchaseConfirmDialog.addEventListener("click", (event) => {
@@ -896,6 +927,7 @@
     e.preventDefault();
     e.returnValue = "";
   });
+  {% endif %}
 
   purchaseForm.addEventListener("submit", (e) => {
     const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
@@ -937,8 +969,11 @@
         salePriceInput.value = String(salePriceValue);
       }
     });
+    {% if not low_resource_mode %}
     e.preventDefault();
     openPurchaseConfirmDialog();
+    {% endif %}
   });
 </script>
+{% endif %}
 {% endblock %}

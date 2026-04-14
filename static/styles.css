@@ -243,6 +243,82 @@ body {
   gap: 0.75rem;
 }
 
+body.performance-low,
+body.performance-low::before {
+  background: #eef3ef !important;
+}
+
+body.performance-low *,
+body.performance-low *::before,
+body.performance-low *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+body.performance-low::before,
+body.performance-low .page-glow {
+  display: none !important;
+}
+
+body.performance-low .topbar,
+body.performance-low .table th,
+body.performance-low .shopping-dialog::backdrop,
+body.performance-low .shopping-dialog-shell,
+body.performance-low .emoji-group-title {
+  backdrop-filter: none !important;
+}
+
+body.performance-low .topbar,
+body.performance-low .table th,
+body.performance-low .emoji-group-title {
+  position: static !important;
+}
+
+body.performance-low .topbar {
+  background: #1d4b43 !important;
+  box-shadow: none !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+body.performance-low .panel,
+body.performance-low .action-card,
+body.performance-low .shopping-dialog-shell,
+body.performance-low .stat-card,
+body.performance-low .analysis-card,
+body.performance-low .analysis-choice,
+body.performance-low .analysis-filter-panel,
+body.performance-low .settings-card,
+body.performance-low .table-wrap,
+body.performance-low .home-compact-card {
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+body.performance-low .table th,
+body.performance-low .flash-item,
+body.performance-low .shopping-dialog-shell,
+body.performance-low .analysis-card,
+body.performance-low .analysis-choice,
+body.performance-low .page-intro {
+  background-image: none !important;
+}
+
+body.performance-low .table th {
+  background: #edf3ef !important;
+}
+
+body.performance-low .shopping-dialog::backdrop {
+  background: rgba(18, 31, 27, 0.28) !important;
+}
+
+body.performance-low .emoji-option:hover,
+body.performance-low .action-card:hover,
+body.performance-low .btn:hover,
+body.performance-low .analysis-choice:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 .home-intro {
   margin-bottom: 1rem;
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -31,7 +32,6 @@ def list_purchase_history(
         if (m.get("tipo") or "").strip().upper() in {"ENTRADA", "INFO"}
         and (m.get("origen") or "").strip().upper() == "COMPRA"
     ]
-    rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
 
     grouped: Dict[str, List[Dict[str, str]]] = {}
     for m in rows:
@@ -41,9 +41,10 @@ def list_purchase_history(
         grouped.setdefault(ref, []).append(m)
 
     tickets: List[Dict[str, str]] = []
-    lines_map: Dict[str, List[Dict[str, str]]] = {}
+    lines_by_ref: Dict[str, List[Dict[str, str]]] = {}
 
     for ref_id, items in grouped.items():
+        items.sort(key=lambda x: x.get("fecha", ""), reverse=True)
         first = items[0]
         usuario = _extract_from_note(first.get("nota", ""), "Usr:")
         proveedor = _extract_from_note(first.get("nota", ""), "Prov:")
@@ -69,7 +70,7 @@ def list_purchase_history(
                 "nota": m.get("nota", ""),
             })
 
-        lines_map[ref_id] = lines
+        lines_by_ref[ref_id] = lines
         tickets.append({
             "ref_id": ref_id,
             "fecha": first.get("fecha", ""),
@@ -80,10 +81,12 @@ def list_purchase_history(
             "total_importe": f"{total:.2f}",
         })
 
-    tickets.sort(key=lambda x: x.get("fecha", ""), reverse=True)
     if limit > 0:
-        tickets = tickets[:limit]
-        allowed = {t["ref_id"] for t in tickets}
-        lines_map = {k: v for k, v in lines_map.items() if k in allowed}
+        tickets = nlargest(limit, tickets, key=lambda x: x.get("fecha", ""))
+    else:
+        tickets.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+
+    allowed = {t["ref_id"] for t in tickets}
+    lines_map = {k: lines_by_ref[k] for k in allowed if k in lines_by_ref}
 
     return tickets, lines_map

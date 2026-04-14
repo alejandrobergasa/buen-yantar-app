@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}">
+<body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}{% if low_resource_mode %} performance-low{% endif %}">
   <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
   <div class="page-glow page-glow-a" aria-hidden="true"></div>
   <div class="page-glow page-glow-b" aria-hidden="true"></div>

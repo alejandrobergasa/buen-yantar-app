@@ -1,0 +1,335 @@
+<script>
+  function normalizeText(s) {
+    return (s || "")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+  }
+
+  function parseNumber(raw) {
+    let t = (raw || "").trim().replace(/\s/g, "");
+    if (!t) return null;
+    if (t.includes(",") && t.includes(".")) {
+      if (t.lastIndexOf(",") > t.lastIndexOf(".")) {
+        t = t.replace(/\./g, "").replace(",", ".");
+      } else {
+        t = t.replace(/,/g, "");
+      }
+    } else {
+      t = t.replace(",", ".");
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function debounce(fn, delay) {
+    let timerId = 0;
+    return (...args) => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  function formatMoney(value) {
+    return `${value.toFixed(2)} €`;
+  }
+
+  const searchBox = document.getElementById("purchaseSearch");
+  const groupFilter = document.getElementById("purchaseGroup");
+  const productRows = Array.from(document.querySelectorAll(".purchase-product-row"));
+  const purchaseProductsTbody = document.getElementById("productsPickTbody");
+  const noResultsBox = document.getElementById("purchaseNoResults");
+  const purchaseLines = document.getElementById("purchaseLines");
+  const purchaseEmpty = document.getElementById("purchaseEmpty");
+  const rowTpl = document.getElementById("ticketRowTpl");
+  const purchaseForm = document.getElementById("purchaseForm");
+  const hiddenFQ = document.getElementById("purchaseFQ");
+  const hiddenFG = document.getElementById("purchaseFG");
+  const sumAmount = document.getElementById("sumAmount");
+  const selectedById = new Map();
+
+  function productDataFromRow(sourceRow) {
+    return {
+      pid: sourceRow.dataset.productId,
+      name: sourceRow.dataset.name || "",
+      emoji: sourceRow.dataset.emoji || "📦",
+      stockUnit: sourceRow.dataset.stockUnit || "ud",
+      saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
+      fractional: sourceRow.dataset.fraccionable === "1",
+      fractions: sourceRow.dataset.fractions || "1",
+      salePrice: sourceRow.dataset.salePrice || "",
+    };
+  }
+
+  function syncSelectedState() {
+    productRows.forEach((row) => {
+      row.classList.toggle("row-selected-soft", selectedById.has(row.dataset.productId || ""));
+    });
+  }
+
+  function getPurchasePricing({ qty, unitPrice, subtotal, fractional, fractions }) {
+    const qtyValue = parseNumber(qty);
+    const unitPriceValue = parseNumber(unitPrice);
+    const subtotalValue = parseNumber(subtotal);
+    const fractionsValue = parseNumber(fractions || "1");
+    const isFractional = fractional === true || fractional === "1";
+    const hasQty = qtyValue !== null && !Number.isNaN(qtyValue) && qtyValue > 0;
+    const hasUnitPrice = unitPriceValue !== null && !Number.isNaN(unitPriceValue) && unitPriceValue >= 0;
+    const hasSubtotal = subtotalValue !== null && !Number.isNaN(subtotalValue) && subtotalValue >= 0;
+    const hasFractions = fractionsValue !== null && !Number.isNaN(fractionsValue) && fractionsValue > 0;
+
+    const lineTotal = isFractional
+      ? (hasSubtotal ? subtotalValue : null)
+      : (hasQty && hasUnitPrice ? qtyValue * unitPriceValue : null);
+    const unitPurchasePrice = isFractional
+      ? (hasSubtotal && hasQty ? subtotalValue / qtyValue : null)
+      : (hasUnitPrice ? unitPriceValue : null);
+    const saleUnitBasePrice = unitPurchasePrice !== null && (!isFractional || hasFractions)
+      ? (isFractional ? unitPurchasePrice / fractionsValue : unitPurchasePrice)
+      : null;
+
+    return {
+      lineTotal,
+      recommendedSalePrice: saleUnitBasePrice !== null ? saleUnitBasePrice * 1.2 : null,
+    };
+  }
+
+  function updateSaleRecommendation(row) {
+    const recommendedNode = row.querySelector(".purchase-sale-recommended");
+    if (!recommendedNode) return;
+    const pricing = getPurchasePricing({
+      qty: row.querySelector('input[name="cantidad[]"]').value,
+      unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
+      subtotal: row.querySelector('input[name="subtotal_compra[]"]').value,
+      fractional: row.dataset.fractional,
+      fractions: row.dataset.fractions,
+    });
+    recommendedNode.textContent = pricing.recommendedSalePrice === null ? "-" : formatMoney(pricing.recommendedSalePrice);
+  }
+
+  function refreshSummary() {
+    let total = 0;
+    Array.from(purchaseLines.querySelectorAll(".purchase-row")).forEach((row) => {
+      const pricing = getPurchasePricing({
+        qty: row.querySelector('input[name="cantidad[]"]').value,
+        unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
+        subtotal: row.querySelector('input[name="subtotal_compra[]"]').value,
+        fractional: row.dataset.fractional,
+        fractions: row.dataset.fractions,
+      });
+      if (pricing.lineTotal !== null) total += pricing.lineTotal;
+    });
+    if (sumAmount) sumAmount.textContent = formatMoney(total);
+  }
+
+  function refreshEmptyState() {
+    if (purchaseEmpty) purchaseEmpty.style.display = selectedById.size === 0 ? "" : "none";
+    syncSelectedState();
+  }
+
+  function syncLinePricing(row) {
+    const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+    const pricing = getPurchasePricing({
+      qty: row.querySelector('input[name="cantidad[]"]').value,
+      unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
+      subtotal: subtotalInput.value,
+      fractional: row.dataset.fractional,
+      fractions: row.dataset.fractions,
+    });
+    if (row.dataset.fractional !== "1") {
+      subtotalInput.value = pricing.lineTotal !== null ? pricing.lineTotal.toFixed(2) : "";
+    }
+    updateSaleRecommendation(row);
+    refreshSummary();
+  }
+
+  function configurePurchaseRow(row) {
+    const isFractional = row.dataset.fractional === "1";
+    const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
+    const unitPricePassive = row.querySelector(".purchase-price-passive");
+    const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+
+    unitPriceInput.hidden = isFractional;
+    unitPricePassive.hidden = !isFractional;
+    unitPricePassive.setAttribute("aria-hidden", isFractional ? "false" : "true");
+    unitPricePassive.textContent = isFractional ? "Calculado" : "-";
+
+    subtotalInput.readOnly = !isFractional;
+    subtotalInput.classList.toggle("input-readonly", !isFractional);
+    subtotalInput.placeholder = isFractional ? "0.00" : "Auto";
+
+    if (!isFractional) {
+      subtotalInput.value = "";
+    }
+  }
+
+  function attachTicketEvents(row) {
+    const qtyInput = row.querySelector('input[name="cantidad[]"]');
+    const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
+    const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+    const salePriceInput = row.querySelector('input[name="precio_venta_actual[]"]');
+    const removeBtn = row.querySelector(".purchase-remove");
+    const pid = row.querySelector(".ticket-product-id").value;
+
+    [qtyInput, unitPriceInput, subtotalInput].forEach((input) => {
+      input.addEventListener("input", () => syncLinePricing(row));
+    });
+    if (salePriceInput) salePriceInput.addEventListener("input", refreshSummary);
+    if (removeBtn) {
+      removeBtn.addEventListener("click", () => {
+        selectedById.delete(pid);
+        row.remove();
+        refreshEmptyState();
+        refreshSummary();
+      });
+    }
+  }
+
+  function appendPurchaseRow(data, options = {}) {
+    const row = rowTpl.content.firstElementChild.cloneNode(true);
+    row.querySelector(".ticket-product-id").value = data.pid;
+    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    row.querySelector(".ticket-product-meta").textContent = data.fractional
+      ? `Compra en ${data.stockUnit} · Venta en ${data.saleUnit} · ${data.fractions} ${data.saleUnit} por ${data.stockUnit}`
+      : `Compra y venta en ${data.stockUnit}`;
+    row.querySelector('input[name="cantidad[]"]').value = data.qty || "1";
+    row.querySelector('input[name="precio_compra[]"]').value = data.price || "";
+    row.querySelector('input[name="subtotal_compra[]"]').value = data.subtotal || "";
+    row.querySelector('input[name="precio_venta_actual[]"]').value = data.salePrice || "";
+    row.querySelector('input[name="nota_linea[]"]').value = data.note || "";
+    row.dataset.stockUnit = data.stockUnit || "ud";
+    row.dataset.saleUnit = data.saleUnit || data.stockUnit || "ud";
+    row.dataset.fractional = data.fractional ? "1" : "0";
+    row.dataset.fractions = data.fractions || "1";
+
+    purchaseLines.appendChild(row);
+    selectedById.set(data.pid, row);
+    configurePurchaseRow(row);
+    attachTicketEvents(row);
+    syncLinePricing(row);
+    refreshEmptyState();
+
+    if (options.focus !== false) {
+      const qtyInput = row.querySelector('input[name="cantidad[]"]');
+      qtyInput.focus();
+      qtyInput.select();
+    }
+  }
+
+  function addProductToTicket(sourceRow) {
+    const pid = sourceRow.dataset.productId;
+    if (!pid) return;
+
+    if (selectedById.has(pid)) {
+      const existingRow = selectedById.get(pid);
+      const qtyInput = existingRow.querySelector('input[name="cantidad[]"]');
+      const currentQty = parseNumber(qtyInput.value);
+      qtyInput.value = String((currentQty !== null && !Number.isNaN(currentQty) ? currentQty : 0) + 1);
+      syncLinePricing(existingRow);
+      qtyInput.focus();
+      qtyInput.select();
+      return;
+    }
+
+    appendPurchaseRow(productDataFromRow(sourceRow));
+  }
+
+  function applyProductFilters() {
+    const q = normalizeText(searchBox ? searchBox.value : "");
+    const g = (groupFilter && groupFilter.value || "").trim();
+    let visible = 0;
+
+    productRows.forEach((row) => {
+      const name = normalizeText(row.dataset.name || "");
+      const group = (row.dataset.group || "").trim();
+      const match = (!q || name.includes(q)) && (!g || group === g);
+      row.style.display = match ? "" : "none";
+      if (match) visible += 1;
+    });
+
+    if (noResultsBox) noResultsBox.hidden = visible !== 0;
+    if (hiddenFQ) hiddenFQ.value = (searchBox && searchBox.value || "").trim();
+    if (hiddenFG) hiddenFG.value = (groupFilter && groupFilter.value || "").trim();
+  }
+
+  if (purchaseProductsTbody) {
+    purchaseProductsTbody.addEventListener("click", (event) => {
+      const row = event.target.closest(".purchase-product-row");
+      if (row) addProductToTicket(row);
+    });
+    purchaseProductsTbody.addEventListener("keydown", (event) => {
+      const row = event.target.closest(".purchase-product-row");
+      if (!row) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        addProductToTicket(row);
+      }
+    });
+  }
+
+  if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
+  if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+
+  purchaseForm.addEventListener("submit", (event) => {
+    const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
+    if (!rows.length) {
+      event.preventDefault();
+      alert("Debes anadir al menos un producto antes de registrar la compra.");
+      return;
+    }
+
+    let hasErrors = false;
+    rows.forEach((row) => {
+      const qtyInput = row.querySelector('input[name="cantidad[]"]');
+      const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
+      const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+      const salePriceInput = row.querySelector('input[name="precio_venta_actual[]"]');
+      const qtyValue = parseNumber(qtyInput.value);
+      const unitPriceValue = parseNumber(unitPriceInput.value);
+      const subtotalValue = parseNumber(subtotalInput.value);
+      const salePriceValue = parseNumber(salePriceInput.value);
+      const fractional = row.dataset.fractional === "1";
+
+      if (qtyValue === null || Number.isNaN(qtyValue) || qtyValue <= 0) {
+        hasErrors = true;
+        return;
+      }
+      qtyInput.value = String(qtyValue);
+
+      if (fractional) {
+        if (subtotalValue === null || Number.isNaN(subtotalValue) || subtotalValue < 0) {
+          hasErrors = true;
+          return;
+        }
+        subtotalInput.value = String(subtotalValue);
+        unitPriceInput.value = "";
+      } else {
+        if (unitPriceValue === null || Number.isNaN(unitPriceValue) || unitPriceValue < 0) {
+          hasErrors = true;
+          return;
+        }
+        unitPriceInput.value = String(unitPriceValue);
+        syncLinePricing(row);
+        const normalizedSubtotal = parseNumber(subtotalInput.value);
+        subtotalInput.value = normalizedSubtotal !== null && !Number.isNaN(normalizedSubtotal) ? String(normalizedSubtotal) : "";
+      }
+
+      if (salePriceValue === null || Number.isNaN(salePriceValue) || salePriceValue < 0) {
+        hasErrors = true;
+        return;
+      }
+      salePriceInput.value = String(salePriceValue);
+    });
+
+    if (hasErrors) {
+      event.preventDefault();
+      alert("Revisa cantidad, precios y subtotales antes de registrar la compra.");
+    }
+  });
+
+  applyProductFilters();
+  refreshEmptyState();
+  refreshSummary();
+</script>

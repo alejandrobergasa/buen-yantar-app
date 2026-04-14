@@ -1,5 +1,7 @@
-from pathlib import Path
 import os
+import platform
+import struct
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -19,6 +21,29 @@ CSV_GASTOS_LIBRES = DATA_DIR / "gastos_libres.csv"
 PRINT_JOBS_DIR = DATA_DIR / "print_jobs"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-cambia-esto")
+AUDIT_READ_REQUESTS = os.getenv("AUDIT_READ_REQUESTS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _auto_low_resource_mode() -> bool:
+    if platform.system() != "Windows":
+        return False
+
+    release = platform.release().strip()
+    is_legacy_windows = release == "7"
+    is_32bit_python = struct.calcsize("P") == 4
+    return is_legacy_windows or is_32bit_python
+
+
+def _read_low_resource_mode() -> bool:
+    raw = os.getenv("LOW_RESOURCE_MODE", "auto").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return _auto_low_resource_mode()
+
+
+LOW_RESOURCE_MODE = _read_low_resource_mode()
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

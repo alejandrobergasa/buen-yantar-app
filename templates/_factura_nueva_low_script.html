@@ -1,0 +1,222 @@
+<script>
+  function normalizeText(s) {
+    return (s || "")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+  }
+
+  function parseNumber(raw) {
+    let t = (raw || "").trim().replace(/\s/g, "");
+    if (!t) return null;
+    if (t.includes(",") && t.includes(".")) {
+      if (t.lastIndexOf(",") > t.lastIndexOf(".")) {
+        t = t.replace(/\./g, "").replace(",", ".");
+      } else {
+        t = t.replace(/,/g, "");
+      }
+    } else {
+      t = t.replace(",", ".");
+    }
+    const n = Number(t);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+
+  function debounce(fn, delay) {
+    let timerId = 0;
+    return (...args) => {
+      window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  const searchBox = document.getElementById("invoiceSearch");
+  const groupFilter = document.getElementById("invoiceGroup");
+  const productRows = Array.from(document.querySelectorAll(".invoice-product-row"));
+  const invoiceProductsTbody = document.getElementById("invoiceProductsTbody");
+  const noResultsBox = document.getElementById("invoiceNoResults");
+  const invoiceLines = document.getElementById("invoiceLines");
+  const invoiceEmpty = document.getElementById("invoiceEmpty");
+  const rowTpl = document.getElementById("invoiceRowTpl");
+  const invoiceForm = document.getElementById("invoiceForm");
+  const hiddenFQ = document.getElementById("invoiceFQ");
+  const hiddenFG = document.getElementById("invoiceFG");
+  const sumAmountPinned = document.getElementById("sumAmountPinned");
+  const selectedById = new Map();
+
+  function productDataFromRow(sourceRow) {
+    return {
+      pid: sourceRow.dataset.productId,
+      name: sourceRow.dataset.name || "",
+      emoji: sourceRow.dataset.emoji || "📦",
+      stockUnit: sourceRow.dataset.stockUnit || "ud",
+      saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
+      fractional: sourceRow.dataset.fraccionable === "1",
+      fractions: sourceRow.dataset.fractions || "1",
+      defaultPrice: sourceRow.dataset.price || "0",
+    };
+  }
+
+  function syncSelectedState() {
+    productRows.forEach((row) => {
+      row.classList.toggle("row-selected-soft", selectedById.has(row.dataset.productId || ""));
+    });
+  }
+
+  function updateLineAmount(row) {
+    const qty = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
+    const price = parseNumber(row.querySelector('input[name="precio_unitario[]"]').value);
+    const amountNode = row.querySelector(".js-line-amount");
+    if (!amountNode || qty === null || price === null || Number.isNaN(qty) || Number.isNaN(price) || qty <= 0 || price < 0) {
+      if (amountNode) amountNode.textContent = "0.00 €";
+      return;
+    }
+    amountNode.textContent = `${(qty * price).toFixed(2)} €`;
+  }
+
+  function refreshSummary() {
+    let total = 0;
+    Array.from(invoiceLines.querySelectorAll(".invoice-row")).forEach((row) => {
+      const qty = parseNumber(row.querySelector('input[name="cantidad[]"]').value);
+      const price = parseNumber(row.querySelector('input[name="precio_unitario[]"]').value);
+      if (qty !== null && price !== null && !Number.isNaN(qty) && !Number.isNaN(price) && qty > 0 && price >= 0) {
+        total += qty * price;
+      }
+      updateLineAmount(row);
+    });
+    if (sumAmountPinned) sumAmountPinned.textContent = `${total.toFixed(2)} €`;
+  }
+
+  function refreshEmptyState() {
+    if (invoiceEmpty) invoiceEmpty.style.display = selectedById.size === 0 ? "" : "none";
+    syncSelectedState();
+  }
+
+  function attachRowEvents(row) {
+    const qtyInput = row.querySelector('input[name="cantidad[]"]');
+    const removeBtn = row.querySelector(".purchase-remove");
+    const pid = row.querySelector(".ticket-product-id").value;
+
+    if (qtyInput) {
+      qtyInput.addEventListener("input", refreshSummary);
+    }
+    if (removeBtn) {
+      removeBtn.addEventListener("click", () => {
+        selectedById.delete(pid);
+        row.remove();
+        refreshEmptyState();
+        refreshSummary();
+      });
+    }
+  }
+
+  function appendInvoiceRow(data, options = {}) {
+    const row = rowTpl.content.firstElementChild.cloneNode(true);
+    row.querySelector(".ticket-product-id").value = data.pid;
+    row.querySelector(".ticket-product-price").value = data.defaultPrice || "0";
+    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    row.querySelector(".ticket-product-meta").textContent = data.fractional
+      ? `Venta en ${data.saleUnit} · ${data.fractions} ${data.saleUnit} por ${data.stockUnit}`
+      : `Unidad de venta: ${data.saleUnit}`;
+    row.querySelector('input[name="cantidad[]"]').value = "1";
+    row.querySelector(".js-line-price").textContent = `${(parseNumber(data.defaultPrice) || 0).toFixed(2)} €`;
+    row.dataset.saleUnit = data.saleUnit || "ud";
+
+    invoiceLines.appendChild(row);
+    selectedById.set(data.pid, row);
+    attachRowEvents(row);
+    refreshEmptyState();
+    refreshSummary();
+
+    if (options.focus !== false) {
+      const qtyInput = row.querySelector('input[name="cantidad[]"]');
+      qtyInput.focus();
+      qtyInput.select();
+    }
+  }
+
+  function addProductToInvoice(sourceRow) {
+    const pid = sourceRow.dataset.productId;
+    if (!pid) return;
+
+    if (selectedById.has(pid)) {
+      const existingRow = selectedById.get(pid);
+      const qtyInput = existingRow.querySelector('input[name="cantidad[]"]');
+      const currentQty = parseNumber(qtyInput.value);
+      qtyInput.value = String((currentQty !== null && !Number.isNaN(currentQty) ? currentQty : 0) + 1);
+      refreshSummary();
+      qtyInput.focus();
+      qtyInput.select();
+      return;
+    }
+
+    appendInvoiceRow(productDataFromRow(sourceRow));
+  }
+
+  function applyProductFilters() {
+    const q = normalizeText(searchBox ? searchBox.value : "");
+    const g = (groupFilter && groupFilter.value || "").trim();
+    let visible = 0;
+
+    productRows.forEach((row) => {
+      const name = normalizeText(row.dataset.name || "");
+      const group = (row.dataset.group || "").trim();
+      const match = (!q || name.includes(q)) && (!g || group === g);
+      row.style.display = match ? "" : "none";
+      if (match) visible += 1;
+    });
+
+    if (noResultsBox) noResultsBox.hidden = visible !== 0;
+    if (hiddenFQ) hiddenFQ.value = (searchBox && searchBox.value || "").trim();
+    if (hiddenFG) hiddenFG.value = (groupFilter && groupFilter.value || "").trim();
+  }
+
+  if (invoiceProductsTbody) {
+    invoiceProductsTbody.addEventListener("click", (event) => {
+      const row = event.target.closest(".invoice-product-row");
+      if (row) addProductToInvoice(row);
+    });
+    invoiceProductsTbody.addEventListener("keydown", (event) => {
+      const row = event.target.closest(".invoice-product-row");
+      if (!row) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        addProductToInvoice(row);
+      }
+    });
+  }
+
+  if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
+  if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+
+  invoiceForm.addEventListener("submit", (event) => {
+    const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
+    if (!rows.length) {
+      event.preventDefault();
+      alert("Debes anadir al menos un producto antes de registrar la factura.");
+      return;
+    }
+
+    let hasErrors = false;
+    rows.forEach((row) => {
+      const qtyInput = row.querySelector('input[name="cantidad[]"]');
+      const qtyValue = parseNumber(qtyInput.value);
+      if (qtyValue === null || Number.isNaN(qtyValue) || qtyValue <= 0) {
+        hasErrors = true;
+      } else {
+        qtyInput.value = String(qtyValue);
+      }
+    });
+
+    if (hasErrors) {
+      event.preventDefault();
+      alert("Revisa las cantidades antes de registrar la factura.");
+    }
+  });
+
+  applyProductFilters();
+  refreshEmptyState();
+  refreshSummary();
+</script>
