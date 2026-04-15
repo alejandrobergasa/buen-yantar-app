@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -79,7 +80,10 @@ def verify_login(users_csv: Path, username: str, password: str) -> bool:
         return False
     if u.get("activo", "1") != "1":
         return False
-    return check_password_hash(u.get("password_hash", ""), password or "")
+    stored_hash = (u.get("password_hash") or "").strip()
+    if len(stored_hash) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in stored_hash):
+        return hashlib.md5((password or "").encode("utf-8")).hexdigest().lower() == stored_hash.lower()
+    return check_password_hash(stored_hash, password or "")
 
 
 def is_admin(user_row: Optional[Dict[str, str]]) -> bool:

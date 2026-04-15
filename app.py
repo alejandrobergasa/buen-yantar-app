@@ -7,6 +7,7 @@ import io
 import math
 import os
 import unicodedata
+from pathlib import Path
 import config
 
 from services.csv_store import ensure_csv, read_all
@@ -32,6 +33,14 @@ from services.free_expenses import (
     free_expense_category_label,
     list_free_expenses,
 )
+from services.groups import (
+    GROUP_HEADERS,
+    create_group,
+    delete_group,
+    ensure_group_catalog,
+    find_group_by_name,
+    list_groups,
+)
 from services.auth import (
     ensure_default_admin,
     verify_login,
@@ -45,6 +54,7 @@ from services.auth import (
     delete_user,
 )
 from services.purchases import list_purchase_history
+from services.legacy_migration import migrate_legacy_dataset
 from services.inventory import (
     PRODUCT_HEADERS, MOV_HEADERS,
     ensure_product_schema,
@@ -78,6 +88,7 @@ def create_app() -> Flask:
     config.ensure_dirs()
     ensure_csv(config.CSV_USUARIOS, USERS_HEADERS)
     ensure_csv(config.CSV_PRODUCTOS, PRODUCT_HEADERS)
+    ensure_csv(config.CSV_GRUPOS, GROUP_HEADERS)
     ensure_csv(config.CSV_MOVS, MOV_HEADERS)
     ensure_csv(config.CSV_FACTURAS, INVOICE_HEADERS)
     ensure_csv(config.CSV_FACTURA_LINEAS, INVOICE_LINE_HEADERS)
@@ -86,6 +97,11 @@ def create_app() -> Flask:
     ensure_csv(config.CSV_GASTOS_LIBRES, FREE_EXPENSE_HEADERS)
     ensure_user_schema(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR)
     ensure_product_schema(config.CSV_PRODUCTOS, backup_dir=config.BACKUP_DIR)
+    ensure_group_catalog(
+        config.CSV_GRUPOS,
+        products_csv=config.CSV_PRODUCTOS,
+        backup_dir=config.BACKUP_DIR,
+    )
     ensure_cashbox(config.CSV_CAJA)
 
     ensure_default_admin(config.CSV_USUARIOS)
@@ -304,6 +320,20 @@ def create_app() -> Flask:
         sale_text = f"{format_compact_number(sale_qty)} {sale_unit_label(product)}"
         return (sale_text, stock_text)
 
+    def group_options_for_products(prods: list[dict[str, str]] | None = None) -> list[tuple[str, str]]:
+        ensure_group_catalog(
+            config.CSV_GRUPOS,
+            products=prods,
+            backup_dir=config.BACKUP_DIR,
+        )
+        return [
+            (
+                (row.get("nombre") or "Otros").strip() or "Otros",
+                (row.get("emoji") or "📦").strip() or "📦",
+            )
+            for row in list_groups(config.CSV_GRUPOS)
+        ]
+
     def extract_note_value(note: str, prefix: str) -> str:
         for part in (note or "").split("|"):
             text = part.strip()
@@ -364,6 +394,10 @@ def create_app() -> Flask:
             "usuarios-admin": "usuarios",
             "perfil-acceso": "usuarios",
             "usuarios": "usuarios",
+            "grupos-productos": "grupos",
+            "grupos": "grupos",
+            "migracion-legacy": "migracion",
+            "migracion": "migracion",
             "logs-uso": "logs",
             "logs": "logs",
         }
@@ -373,6 +407,8 @@ def create_app() -> Flask:
         endpoint_by_section = {
             "caja": "configuracion_caja",
             "usuarios": "configuracion_usuarios",
+            "grupos": "configuracion_grupos",
+            "migracion": "configuracion_migracion",
             "logs": "configuracion_logs",
         }
         key = config_section_key(section)
@@ -385,6 +421,8 @@ def create_app() -> Flask:
         items = [
             ("caja", "Configurar saldo de caja", url_for("configuracion_caja")),
             ("usuarios", "Configurar usuarios", url_for("configuracion_usuarios")),
+            ("grupos", "Gestionar grupos", url_for("configuracion_grupos")),
+            ("migracion", "Migracion legacy", url_for("configuracion_migracion")),
             ("logs", "Revisar logs de uso", url_for("configuracion_logs")),
         ]
         return [
@@ -460,6 +498,37 @@ def create_app() -> Flask:
                 "total": len(users),
                 "admins": sum(1 for row in users if (row.get("rol") or "").strip().lower() == "admin"),
                 "normal": sum(1 for row in users if (row.get("rol") or "normal").strip().lower() != "admin"),
+            },
+        }
+
+    def admin_groups_context() -> dict[str, object]:
+        products = get_products(config.CSV_PRODUCTOS)
+        ensure_group_catalog(
+            config.CSV_GRUPOS,
+            products=products,
+            backup_dir=config.BACKUP_DIR,
+        )
+        counts: dict[str, int] = {}
+        for product in products:
+            group_name = (product.get("grupo") or "Otros").strip() or "Otros"
+            counts[group_name] = counts.get(group_name, 0) + 1
+
+        groups = []
+        for row in list_groups(config.CSV_GRUPOS):
+            group_name = (row.get("nombre") or "Otros").strip() or "Otros"
+            groups.append({
+                **row,
+                "product_count": counts.get(group_name, 0),
+            })
+        groups.sort(key=lambda row: (row.get("nombre") or "").lower())
+
+        return {
+            "groups": groups,
+            "group_stats": {
+                "total": len(groups),
+                "used": sum(1 for row in groups if row["product_count"] > 0),
+                "empty": sum(1 for row in groups if row["product_count"] == 0),
+                "products": len(products),
             },
         }
 
@@ -1422,8 +1491,14 @@ def create_app() -> Flask:
                         "configuracion",
                         "configuracion_caja",
                         "configuracion_usuarios",
+                        "configuracion_grupos",
+                        "configuracion_migracion",
                         "configuracion_logs",
                         "actualizar_saldo_caja",
+                        "crear_grupo_config",
+                        "reasignar_grupo_config",
+                        "eliminar_grupo_config",
+                        "ejecutar_migracion_legacy",
                         "supervision",
                     },
                 },
@@ -1636,6 +1711,190 @@ def create_app() -> Flask:
             config_nav=config_shortcuts("usuarios"),
             **admin_user_context(),
         )
+
+    @app.get("/configuracion/grupos")
+    def configuracion_grupos():
+        r = require_admin()
+        if r:
+            return r
+
+        return render_template(
+            "configuracion.html",
+            title="Grupos de productos",
+            config_section="grupos",
+            config_title="Gestionar grupos de productos",
+            config_subtitle="Crea nuevos grupos, reasigna productos y elimina grupos legacy que ya no uses.",
+            config_nav=config_shortcuts("grupos"),
+            **admin_groups_context(),
+        )
+
+    @app.post("/configuracion/grupos/crear")
+    def crear_grupo_config():
+        r = require_admin()
+        if r:
+            return r
+
+        group_name = (request.form.get("nombre") or "").strip()
+        emoji = (request.form.get("emoji") or "").strip()
+        if not group_name:
+            flash("Debes indicar el nombre del grupo.")
+            return redirect_to_config("grupos")
+
+        create_group(
+            config.CSV_GRUPOS,
+            group_name=group_name,
+            emoji=emoji or "📦",
+            backup_dir=config.BACKUP_DIR,
+        )
+        flash("Grupo guardado ✅")
+        return redirect_to_config("grupos")
+
+    @app.post("/configuracion/grupos/reasignar")
+    def reasignar_grupo_config():
+        r = require_admin()
+        if r:
+            return r
+
+        source_group = (request.form.get("grupo_origen") or "").strip()
+        target_group = (request.form.get("grupo_destino") or "").strip()
+        if not source_group or not target_group:
+            flash("Debes indicar grupo origen y grupo destino.")
+            return redirect_to_config("grupos")
+        if source_group == target_group:
+            flash("El grupo origen y el destino no pueden ser el mismo.")
+            return redirect_to_config("grupos")
+
+        target_group_row = find_group_by_name(config.CSV_GRUPOS, target_group)
+        if not target_group_row:
+            flash("El grupo destino no existe.")
+            return redirect_to_config("grupos")
+
+        products = get_products(config.CSV_PRODUCTOS)
+        product_updates: dict[str, dict[str, str]] = {}
+        changed = 0
+        for product in products:
+            current_group = (product.get("grupo") or "Otros").strip() or "Otros"
+            if current_group != source_group:
+                continue
+            changed += 1
+            product_updates[product["producto_id"]] = {
+                "grupo": target_group,
+                "grupo_emoji": (target_group_row.get("emoji") or "📦").strip() or "📦",
+            }
+
+        if not product_updates:
+            flash("No hay productos en el grupo origen.")
+            return redirect_to_config("grupos")
+
+        update_many_product_fields(
+            config.CSV_PRODUCTOS,
+            backup_dir=config.BACKUP_DIR,
+            updates=product_updates,
+        )
+        flash(f"Productos reasignados: {changed} ✅")
+        return redirect_to_config("grupos")
+
+    @app.post("/configuracion/grupos/eliminar")
+    def eliminar_grupo_config():
+        r = require_admin()
+        if r:
+            return r
+
+        group_name = (request.form.get("grupo") or "").strip()
+        if not group_name:
+            flash("Grupo no válido.")
+            return redirect_to_config("grupos")
+
+        in_use = any(
+            ((product.get("grupo") or "Otros").strip() or "Otros") == group_name
+            for product in get_products(config.CSV_PRODUCTOS)
+        )
+        if in_use:
+            flash("No puedes eliminar un grupo que todavía tiene productos. Reasígnalos antes.")
+            return redirect_to_config("grupos")
+
+        if not delete_group(config.CSV_GRUPOS, group_name=group_name, backup_dir=config.BACKUP_DIR):
+            flash("No se pudo eliminar el grupo.")
+            return redirect_to_config("grupos")
+
+        flash("Grupo eliminado 🗑️")
+        return redirect_to_config("grupos")
+
+    @app.get("/configuracion/migracion")
+    def configuracion_migracion():
+        r = require_admin()
+        if r:
+            return r
+
+        return render_template(
+            "configuracion.html",
+            title="Migracion legacy",
+            config_section="migracion",
+            config_title="Migracion desde archivos legacy",
+            config_subtitle="Sustituye usuarios, inventario, facturas, movimientos y saldo de caja por los datos de la version antigua.",
+            config_nav=config_shortcuts("migracion"),
+        )
+
+    @app.post("/configuracion/migracion")
+    def ejecutar_migracion_legacy():
+        r = require_admin()
+        if r:
+            return r
+
+        folder_raw = (request.form.get("legacy_folder") or "").strip()
+        cash_raw = (request.form.get("saldo_caja_final") or "").strip()
+        if not folder_raw:
+            flash("Debes indicar la carpeta que contiene los archivos legacy.")
+            return redirect_to_config("migracion")
+
+        legacy_folder = Path(folder_raw).expanduser()
+        if not legacy_folder.is_absolute():
+            legacy_folder = (config.BASE_DIR / legacy_folder).resolve()
+
+        try:
+            final_cash = round(parse_decimal(cash_raw), 2)
+        except ValueError:
+            flash("El saldo final de caja no es válido.")
+            return redirect_to_config("migracion")
+
+        try:
+            result = migrate_legacy_dataset(
+                legacy_folder=legacy_folder,
+                saldo_final_caja=final_cash,
+                csv_usuarios=config.CSV_USUARIOS,
+                csv_productos=config.CSV_PRODUCTOS,
+                csv_grupos=config.CSV_GRUPOS,
+                csv_movs=config.CSV_MOVS,
+                csv_facturas=config.CSV_FACTURAS,
+                csv_factura_lineas=config.CSV_FACTURA_LINEAS,
+                csv_caja=config.CSV_CAJA,
+                csv_logs=config.CSV_LOGS,
+                csv_gastos=config.CSV_GASTOS_LIBRES,
+                backup_dir=config.BACKUP_DIR,
+                imported_by=session.get("user", ""),
+            )
+            refresh_cash_analysis_storage(force=True)
+            log_action(
+                config.CSV_LOGS,
+                session.get("user", ""),
+                "MIGRACION LEGACY",
+                (
+                    f"Carpeta={legacy_folder} | usuarios={result.users} | productos={result.products} | "
+                    f"grupos={result.groups} | facturas={result.invoices} | lineas={result.invoice_lines} | "
+                    f"ajustes_stock={result.stock_adjustments} | placeholders={result.placeholders} | "
+                    f"saldo_final={final_cash:.2f}"
+                ),
+            )
+        except Exception as exc:
+            flash(f"No se pudo completar la migración: {exc}")
+            return redirect_to_config("migracion")
+
+        flash(
+            "Migración completada ✅ "
+            f"Usuarios: {result.users}, productos: {result.products}, grupos: {result.groups}, "
+            f"facturas: {result.invoices}, líneas: {result.invoice_lines}."
+        )
+        return redirect_to_config("migracion")
 
     @app.get("/configuracion/logs")
     def configuracion_logs():
@@ -2015,14 +2274,12 @@ def create_app() -> Flask:
         prods = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
-        groups_map = {}
         rows = []
         low_stock_count = 0
         infinite_stock_count = 0
         for p in prods:
             group_name = (p.get("grupo") or "Otros").strip() or "Otros"
             group_emoji = (p.get("grupo_emoji") or "📦").strip() or "📦"
-            groups_map[group_name] = group_emoji
 
             pid = p["producto_id"]
             infinito = (p.get("stock_infinito", "0") == "1")
@@ -2054,7 +2311,7 @@ def create_app() -> Flask:
                 "bajo_minimo": "1" if bajo_min else "0",
             })
         rows.sort(key=lambda x: x["nombre"].lower())
-        group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+        group_options = group_options_for_products(prods)
 
         if config.LOW_RESOURCE_MODE:
             query = normalize_text_search(current_filters["q"])
@@ -2175,13 +2432,17 @@ def create_app() -> Flask:
 
         grupo_select = (request.form.get("grupo_select") or "").strip()
 
-        # Construimos un mapa de grupos existentes -> emoji a partir del inventario actual
         prods = get_products(config.CSV_PRODUCTOS)
-        groups_map = {}
-        for p in prods:
-            g = (p.get("grupo") or "Otros").strip()
-            e = (p.get("grupo_emoji") or "📦").strip()
-            groups_map[g] = e
+        ensure_group_catalog(
+            config.CSV_GRUPOS,
+            products=prods,
+            backup_dir=config.BACKUP_DIR,
+        )
+        groups_map = {
+            (row.get("nombre") or "Otros").strip() or "Otros":
+            (row.get("emoji") or "📦").strip() or "📦"
+            for row in list_groups(config.CSV_GRUPOS)
+        }
 
         if grupo_select == "__new__":
             grupo = (request.form.get("grupo_custom") or "").strip()
@@ -2241,6 +2502,12 @@ def create_app() -> Flask:
             fraccionable=fraccionable,
             fracciones_por_unidad=fracciones_por_unidad_clean,
             unidad_venta=unidad_venta,
+        )
+        create_group(
+            config.CSV_GRUPOS,
+            group_name=grupo,
+            emoji=grupo_emoji,
+            backup_dir=config.BACKUP_DIR,
         )
         if stock_actual_value is not None:
             set_stock_to_value(config.CSV_MOVS, pid, desired_stock=stock_actual_value)
@@ -2319,6 +2586,12 @@ def create_app() -> Flask:
                 "unidad_venta": unidad_venta,
             },
         )
+        create_group(
+            config.CSV_GRUPOS,
+            group_name=grupo,
+            emoji=grupo_emoji,
+            backup_dir=config.BACKUP_DIR,
+        )
         if stock_actual_value is not None:
             set_stock_to_value(config.CSV_MOVS, producto_id, desired_stock=stock_actual_value)
 
@@ -2357,7 +2630,6 @@ def create_app() -> Flask:
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
         product_options = []
-        groups_map = {}
         low_stock = 0
         infinite_stock = 0
         for p in prods:
@@ -2369,7 +2641,6 @@ def create_app() -> Flask:
             group_name = p.get("grupo", "Otros")
             group_emoji = p.get("grupo_emoji", "📦")
             stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
-            groups_map[group_name] = group_emoji
             product_options.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
@@ -2393,7 +2664,7 @@ def create_app() -> Flask:
                 infinite_stock += 1
             elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
                 low_stock += 1
-        group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+        group_options = group_options_for_products(prods)
         query = normalize_text_search(current_filters["q"])
         group_name = current_filters["g"]
         filtered_product_options = [
@@ -2825,7 +3096,6 @@ def create_app() -> Flask:
         stock_map = calc_stock_by_product(config.CSV_MOVS)
 
         product_options = []
-        groups_map = {}
         low_stock = 0
         infinite_stock = 0
         for p in prods:
@@ -2837,7 +3107,6 @@ def create_app() -> Flask:
             group_name = p.get("grupo", "Otros")
             group_emoji = p.get("grupo_emoji", "📦")
             stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
-            groups_map[group_name] = group_emoji
             product_options.append({
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
@@ -2861,7 +3130,7 @@ def create_app() -> Flask:
                 infinite_stock += 1
             elif current_stock is not None and current_stock < safe_float(p.get("stock_minimo")):
                 low_stock += 1
-        group_options = sorted([(g, groups_map[g]) for g in groups_map], key=lambda x: x[0].lower())
+        group_options = group_options_for_products(prods)
         query = normalize_text_search(current_filters["q"])
         group_name = current_filters["g"]
         filtered_product_options = [

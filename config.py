@@ -10,6 +10,7 @@ BACKUP_DIR = DATA_DIR / "backups"
 
 CSV_USUARIOS = DATA_DIR / "usuarios.csv"
 CSV_PRODUCTOS = DATA_DIR / "productos.csv"
+CSV_GRUPOS = DATA_DIR / "grupos_productos.csv"
 CSV_MOVS = DATA_DIR / "movimientos_inventario.csv"
 CSV_FACTURAS = DATA_DIR / "facturas.csv"
 CSV_FACTURA_LINEAS = DATA_DIR / "facturas_lineas.csv"

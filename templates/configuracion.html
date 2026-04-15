@@ -294,5 +294,159 @@
   </div>
   {% endif %}
 </section>
+{% elif config_section == "grupos" %}
+<div class="home-layout">
+  <section class="panel">
+    <div class="section-head compact-head">
+      <h2 class="section-heading">Nuevo grupo</h2>
+    </div>
+
+    <form method="post" action="{{ url_for('crear_grupo_config') }}" class="form">
+      <div class="grid-2">
+        <div>
+          <label class="label">Nombre del grupo</label>
+          <input class="input" name="nombre" placeholder="Ej: Vinos" required>
+        </div>
+        <div>
+          <label class="label">Emoji</label>
+          <input class="input" name="emoji" placeholder="Ej: 🍷" value="📦">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Crear grupo</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head compact-head">
+      <h2 class="section-heading">Reasignar productos</h2>
+    </div>
+
+    <form method="post" action="{{ url_for('reasignar_grupo_config') }}" class="form">
+      <div class="grid-2">
+        <div>
+          <label class="label">Grupo origen</label>
+          <select name="grupo_origen" required>
+            <option value="">(Selecciona)</option>
+            {% for group in groups %}
+            <option value="{{ group.nombre }}">{{ group.emoji }} {{ group.nombre }} ({{ group.product_count }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Grupo destino</label>
+          <select name="grupo_destino" required>
+            <option value="">(Selecciona)</option>
+            {% for group in groups %}
+            <option value="{{ group.nombre }}">{{ group.emoji }} {{ group.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Reasignar productos</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<section class="panel table-card">
+  <div class="section-head compact-head">
+    <h2 class="section-heading">Grupos actuales</h2>
+  </div>
+
+  <div class="home-mini-stats">
+    <div class="home-mini-stat">
+      <span>Grupos</span>
+      <strong>{{ group_stats.total }}</strong>
+    </div>
+    <div class="home-mini-stat">
+      <span>Con productos</span>
+      <strong>{{ group_stats.used }}</strong>
+    </div>
+    <div class="home-mini-stat">
+      <span>Vacíos</span>
+      <strong>{{ group_stats.empty }}</strong>
+    </div>
+    <div class="home-mini-stat">
+      <span>Productos</span>
+      <strong>{{ group_stats.products }}</strong>
+    </div>
+  </div>
+
+  <div class="inv-scrollbox" style="max-height:60vh;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Grupo</th>
+          <th>Emoji</th>
+          <th>Productos</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for group in groups %}
+        <tr>
+          <td>{{ group.nombre }}</td>
+          <td>{{ group.emoji }}</td>
+          <td>{{ group.product_count }}</td>
+          <td>
+            {% if group.product_count == 0 %}
+            <form method="post" action="{{ url_for('eliminar_grupo_config') }}" onsubmit="return confirm('¿Eliminar este grupo vacío?')">
+              <input type="hidden" name="grupo" value="{{ group.nombre }}">
+              <button class="btn btn-secondary btn-small" type="submit">Eliminar</button>
+            </form>
+            {% else %}
+            <span class="help">Reasigna sus productos antes de eliminarlo</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% elif config_section == "migracion" %}
+<div class="settings-grid">
+  <section class="panel">
+    <div class="section-head compact-head">
+      <div>
+        <h2 class="section-heading">Importar datos legacy</h2>
+        <div class="activity-meta">La migración sustituye completamente usuarios, inventario, facturas, movimientos, gastos libres, logs y saldo de caja.</div>
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('ejecutar_migracion_legacy') }}" class="form" onsubmit="return confirm('¿Seguro que quieres reemplazar toda la base de datos actual por la legacy?')">
+      <div>
+        <label class="label">Carpeta de archivos legacy</label>
+        <input class="input" name="legacy_folder" placeholder="Ej: old_files_example o C:\datos\legacy" required>
+      </div>
+      <div>
+        <label class="label">Saldo final de caja</label>
+        <input class="input" name="saldo_caja_final" placeholder="Ej: 1234,56" required>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Ejecutar migración</button>
+      </div>
+    </form>
+  </section>
+
+  <aside class="settings-side">
+    <section class="panel">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Qué hace</h2>
+        </div>
+      </div>
+      <div class="help">
+        Importa los tres ficheros antiguos, conserva el histórico de facturas, reconstruye el stock inicial necesario para cuadrar existencias y deja la caja con el saldo final que indiques.
+      </div>
+      <div class="help">
+        Los grupos numéricos antiguos se crean como “Grupo 1”, “Grupo 2”, etc., para que luego puedas reasignarlos y eliminarlos desde la sección de grupos.
+      </div>
+    </section>
+  </aside>
+</div>
 {% endif %}
 {% endblock %}
