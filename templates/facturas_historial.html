@@ -21,7 +21,9 @@
     </div>
     <div class="actions actions-end">
         <button class="btn btn-primary" type="submit">Filtrar</button>
+        {% if g.is_admin %}
         <a class="btn btn-secondary" href="{{ url_for('export_historial_facturas', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
+        {% endif %}
         <a class="btn btn-secondary" href="{{ url_for('historial_facturas') }}">Limpiar</a>
     </div>
   </form>
@@ -47,7 +49,9 @@
             <th>Usuario</th>
             <th class="right">Lineas</th>
             <th class="right">Total</th>
+            {% if g.is_admin %}
             <th>Imprimir</th>
+            {% endif %}
             <th>Detalle</th>
           </tr>
         </thead>
@@ -66,6 +70,7 @@
               <td>{{ inv.usuario or "-" }}</td>
               <td class="right">{{ inv.lineas or "0" }}</td>
               <td class="right">{{ inv.total_importe or "0.00" }} €</td>
+              {% if g.is_admin %}
               <td>
                 <form method="post" action="{{ url_for('imprimir_factura', factura_id=fid) }}">
                   <input type="hidden" name="q" value="{{ current_q }}">
@@ -74,6 +79,7 @@
                   <button class="btn btn-secondary btn-small" type="submit">Ticket</button>
                 </form>
               </td>
+              {% endif %}
               <td>
                 <details>
                   <summary>Ver lineas</summary>
@@ -116,6 +122,26 @@
         </tbody>
       </table>
     </div>
+    {% if low_resource_mode %}
+      <div class="help" style="margin-top:0.6rem;">
+        Mostrando {{ history_browser.shown_from }}-{{ history_browser.shown_to }} de {{ history_browser.total }} facturas filtradas.
+      </div>
+      {% if history_browser.page_count > 1 %}
+      <div class="actions" style="margin-top:0.45rem;">
+        {% if history_browser.has_prev %}
+          <a class="btn btn-secondary btn-small" href="{{ history_browser.prev_url }}">Anterior</a>
+        {% else %}
+          <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+        {% endif %}
+        <span class="help">Página {{ history_browser.page }} de {{ history_browser.page_count }}</span>
+        {% if history_browser.has_next %}
+          <a class="btn btn-secondary btn-small" href="{{ history_browser.next_url }}">Siguiente</a>
+        {% else %}
+          <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endif %}
   {% endif %}
 </section>
 <script>

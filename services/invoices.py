@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from heapq import nlargest
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 from .csv_store import read_all, append_rows
 from .ids import prefixed_id, short_id
@@ -30,6 +30,15 @@ INVOICE_LINE_HEADERS = [
     "importe_linea",
     "nota",
 ]
+_LINES_BY_INVOICE_CACHE: Dict[tuple[str, int, int], Dict[str, List[Dict[str, str]]]] = {}
+
+
+def _file_cache_key(path: Path) -> tuple[str, int, int]:
+    resolved = str(path.resolve())
+    if not path.exists():
+        return (resolved, 0, 0)
+    stat = path.stat()
+    return (resolved, stat.st_mtime_ns, stat.st_size)
 
 
 def _format_qty(value: float) -> str:
@@ -143,6 +152,38 @@ def list_invoice_lines(facturas_lineas_csv: Path) -> List[Dict[str, str]]:
     return read_all(facturas_lineas_csv)
 
 
+def list_invoice_lines_for_ids(
+    facturas_lineas_csv: Path,
+    factura_ids: Iterable[str],
+) -> Dict[str, List[Dict[str, str]]]:
+    requested_ids = {
+        str(factura_id or "").strip()
+        for factura_id in factura_ids
+        if str(factura_id or "").strip()
+    }
+    if not requested_ids:
+        return {}
+
+    cache_key = _file_cache_key(facturas_lineas_csv)
+    cached = _LINES_BY_INVOICE_CACHE.get(cache_key)
+    if cached is None:
+        grouped: Dict[str, List[Dict[str, str]]] = {}
+        for row in read_all(facturas_lineas_csv):
+            factura_id = (row.get("factura_id") or "").strip()
+            if not factura_id:
+                continue
+            grouped.setdefault(factura_id, []).append(row)
+        _LINES_BY_INVOICE_CACHE.clear()
+        _LINES_BY_INVOICE_CACHE[cache_key] = grouped
+        cached = grouped
+
+    return {
+        factura_id: [dict(row) for row in cached.get(factura_id, [])]
+        for factura_id in requested_ids
+        if factura_id in cached
+    }
+
+
 def find_invoice(facturas_csv: Path, factura_id: str) -> Dict[str, str] | None:
     target = (factura_id or "").strip()
     if not target:
@@ -159,7 +200,4 @@ def list_invoice_lines_for(facturas_lineas_csv: Path, factura_id: str) -> List[D
     if not target:
         return []
 
-    return [
-        row for row in read_all(facturas_lineas_csv)
-        if (row.get("factura_id") or "").strip() == target
-    ]
+    return list_invoice_lines_for_ids(facturas_lineas_csv, [target]).get(target, [])

@@ -19,7 +19,7 @@
             class="brand brand-home-link"
             href="{{ url_for('home') }}"
             aria-label="Sociedad Buen Yantar - Aplicación Gestora"
-          >Sociedad Buen Yantar - Aplicación Gestora</a>
+          >{% if session.get("user") and (request.endpoint or "") not in ["home", "root"] %}Volver al inicio{% else %}Sociedad Buen Yantar - Aplicación Gestora{% endif %}</a>
         </div>
       </div>
 

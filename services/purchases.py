@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .csv_store import read_all
+_PURCHASE_HISTORY_CACHE: Dict[tuple[str, int, int], Dict[str, object]] = {}
+
+
+def _file_cache_key(path: Path) -> tuple[str, int, int]:
+    resolved = str(path.resolve())
+    if not path.exists():
+        return (resolved, 0, 0)
+    stat = path.stat()
+    return (resolved, stat.st_mtime_ns, stat.st_size)
 
 
 def _to_float(raw: str) -> float:
@@ -22,11 +30,12 @@ def _extract_from_note(note: str, prefix: str) -> str:
     return ""
 
 
-def list_purchase_history(
-    movs_csv: Path,
-    product_names: Dict[str, str],
-    limit: int = 400,
-) -> Tuple[List[Dict[str, str]], Dict[str, List[Dict[str, str]]]]:
+def _purchase_history_base(movs_csv: Path) -> Dict[str, object]:
+    cache_key = _file_cache_key(movs_csv)
+    cached = _PURCHASE_HISTORY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = [
         m for m in read_all(movs_csv)
         if (m.get("tipo") or "").strip().upper() in {"ENTRADA", "INFO"}
@@ -63,7 +72,6 @@ def list_purchase_history(
             pid = (m.get("producto_id") or "").strip()
             lines.append({
                 "producto_id": pid,
-                "producto_nombre": product_names.get(pid, pid),
                 "cantidad": m.get("cantidad", "0"),
                 "precio_compra": f"{unit_price_val:.2f}" if unit_price else "",
                 "importe_linea": f"{importe:.2f}" if unit_price else "",
@@ -81,12 +89,40 @@ def list_purchase_history(
             "total_importe": f"{total:.2f}",
         })
 
+    tickets.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    _PURCHASE_HISTORY_CACHE.clear()
+    _PURCHASE_HISTORY_CACHE[cache_key] = {
+        "tickets": tickets,
+        "lines_by_ref": lines_by_ref,
+    }
+    return _PURCHASE_HISTORY_CACHE[cache_key]
+
+
+def list_purchase_history(
+    movs_csv: Path,
+    product_names: Dict[str, str],
+    limit: int = 400,
+) -> Tuple[List[Dict[str, str]], Dict[str, List[Dict[str, str]]]]:
+    base = _purchase_history_base(movs_csv)
+    base_tickets = base["tickets"]
+    base_lines_by_ref = base["lines_by_ref"]
+
     if limit > 0:
-        tickets = nlargest(limit, tickets, key=lambda x: x.get("fecha", ""))
+        tickets = [dict(ticket) for ticket in base_tickets[:limit]]
     else:
-        tickets.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+        tickets = [dict(ticket) for ticket in base_tickets]
 
     allowed = {t["ref_id"] for t in tickets}
-    lines_map = {k: lines_by_ref[k] for k in allowed if k in lines_by_ref}
+    lines_map = {
+        ref_id: [
+            {
+                **line,
+                "producto_nombre": product_names.get((line.get("producto_id") or "").strip(), (line.get("producto_id") or "").strip()),
+            }
+            for line in base_lines_by_ref.get(ref_id, [])
+        ]
+        for ref_id in allowed
+        if ref_id in base_lines_by_ref
+    }
 
     return tickets, lines_map

@@ -22,7 +22,6 @@ from .invoices import INVOICE_HEADERS, INVOICE_LINE_HEADERS
 USERS_FILENAME = "buenyantarusuarios.txt"
 INVENTORY_FILENAME = "buenyantarinventario.txt"
 INVOICES_FILENAME = "buenyantarfacturas.txt"
-LEGACY_INFINITY_THRESHOLD = 9999
 LEGACY_INVOICE_PREFIX = "LG"
 
 
@@ -117,7 +116,6 @@ def migrate_legacy_dataset(
         name, stock_raw, price_raw, stock_min_raw, legacy_group = parts
         product_id = short_id()
         stock_value = _parse_decimal(stock_raw)
-        infinite = stock_value >= LEGACY_INFINITY_THRESHOLD
         group_name = _group_name_from_legacy(legacy_group)
 
         product_row = {
@@ -125,10 +123,10 @@ def migrate_legacy_dataset(
             "nombre": name.strip(),
             "precio_unitario": _format_amount(_parse_decimal(price_raw)),
             "unidad": "ud",
-            "stock_minimo": "0" if infinite else _format_qty(_parse_decimal(stock_min_raw)),
+            "stock_minimo": _format_qty(_parse_decimal(stock_min_raw)),
             "grupo": group_name,
             "grupo_emoji": "📦",
-            "stock_infinito": "1" if infinite else "0",
+            "stock_infinito": "0",
             "fraccionable": "0",
             "fracciones_por_unidad": "1",
             "unidad_venta": "ud",
@@ -136,7 +134,7 @@ def migrate_legacy_dataset(
         }
         product_rows.append(product_row)
         product_by_name[name.strip().lower()] = product_row
-        desired_stock[product_id] = 0.0 if infinite else stock_value
+        desired_stock[product_id] = stock_value
         groups_map.setdefault(group_name.lower(), {
             "group_id": short_id(),
             "nombre": group_name,

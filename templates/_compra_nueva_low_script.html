@@ -36,8 +36,27 @@
     return `${value.toFixed(2)} €`;
   }
 
+  function showAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    dialog.setAttribute("open", "open");
+  }
+
+  function closeAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    dialog.removeAttribute("open");
+  }
+
   const searchBox = document.getElementById("purchaseSearch");
   const groupFilter = document.getElementById("purchaseGroup");
+  const purchaseFiltersForm = document.getElementById("purchaseFiltersForm");
   const productRows = Array.from(document.querySelectorAll(".purchase-product-row"));
   const purchaseProductsTbody = document.getElementById("productsPickTbody");
   const noResultsBox = document.getElementById("purchaseNoResults");
@@ -48,7 +67,16 @@
   const hiddenFQ = document.getElementById("purchaseFQ");
   const hiddenFG = document.getElementById("purchaseFG");
   const sumAmount = document.getElementById("sumAmount");
+  const purchaseConfirmDialog = document.getElementById("purchaseConfirmDialog");
+  const closePurchaseConfirmDialog = document.getElementById("closePurchaseConfirmDialog");
+  const confirmPurchaseSubmit = document.getElementById("confirmPurchaseSubmit");
+  const purchaseConfirmList = document.getElementById("purchaseConfirmList");
+  const purchaseWarningList = document.getElementById("purchaseWarningList");
+  const purchaseConfirmDate = document.getElementById("purchaseConfirmDate");
+  const purchaseConfirmNote = document.getElementById("purchaseConfirmNote");
+  const purchaseConfirmTotal = document.getElementById("purchaseConfirmTotal");
   const selectedById = new Map();
+  let purchaseConfirmAccepted = false;
 
   function productDataFromRow(sourceRow) {
     return {
@@ -60,6 +88,7 @@
       fractional: sourceRow.dataset.fraccionable === "1",
       fractions: sourceRow.dataset.fractions || "1",
       salePrice: sourceRow.dataset.salePrice || "",
+      originalSalePrice: sourceRow.dataset.salePrice || "",
     };
   }
 
@@ -124,6 +153,166 @@
     if (sumAmount) sumAmount.textContent = formatMoney(total);
   }
 
+  function buildPurchaseConfirmList(rows) {
+    if (!purchaseConfirmList) return;
+    purchaseConfirmList.replaceChildren();
+
+    rows.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "invoice-confirm-item";
+
+      const head = document.createElement("div");
+      head.className = "invoice-confirm-item-head";
+
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+
+      const amount = document.createElement("span");
+      amount.textContent = item.lineTotal !== null ? formatMoney(item.lineTotal) : "-";
+
+      head.append(title, amount);
+
+      const meta = document.createElement("div");
+      meta.className = "invoice-confirm-item-meta";
+      if (item.fractional) {
+        const subtotalValue = parseNumber(item.subtotal);
+        meta.textContent = `Cantidad ${item.qty} ${item.stockUnit} · P. total ${subtotalValue !== null && !Number.isNaN(subtotalValue) ? formatMoney(subtotalValue) : "-"} · Venta ${item.salePrice || "0"} € / ${item.saleUnit}`;
+      } else {
+        const unitPriceValue = parseNumber(item.unitPrice);
+        meta.textContent = `Cantidad ${item.qty} ${item.stockUnit} · P. ud ${unitPriceValue !== null && !Number.isNaN(unitPriceValue) ? formatMoney(unitPriceValue) : "-"} / ${item.stockUnit} · P. total ${item.lineTotal !== null ? formatMoney(item.lineTotal) : "-"} · Venta ${item.salePrice || "0"} € / ${item.saleUnit}`;
+      }
+      card.append(head, meta);
+
+      if ((item.note || "").trim()) {
+        const note = document.createElement("div");
+        note.className = "invoice-confirm-item-meta";
+        note.textContent = `Nota: ${item.note.trim()}`;
+        card.appendChild(note);
+      }
+
+      purchaseConfirmList.appendChild(card);
+    });
+
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay líneas para confirmar.";
+      purchaseConfirmList.appendChild(empty);
+    }
+  }
+
+  function buildPurchaseWarningList(rows) {
+    if (!purchaseWarningList) return;
+    purchaseWarningList.replaceChildren();
+
+    const changed = rows.filter((item) => {
+      const original = parseNumber(item.originalSalePrice);
+      const next = parseNumber(item.salePrice);
+      return original !== null && next !== null && !Number.isNaN(original) && !Number.isNaN(next) && Math.abs(original - next) > 1e-9;
+    });
+
+    if (!changed.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay cambios en precios de venta. El inventario mantendrá los valores actuales.";
+      purchaseWarningList.appendChild(empty);
+      return;
+    }
+
+    changed.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "purchase-warning-item";
+
+      const title = document.createElement("strong");
+      title.className = "purchase-warning-title";
+      title.textContent = item.name;
+
+      const subtitle = document.createElement("div");
+      subtitle.className = "purchase-warning-line";
+      subtitle.textContent = `Venta en ${item.saleUnit}`;
+
+      const originalValue = parseNumber(item.originalSalePrice) || 0;
+      const nextValue = parseNumber(item.salePrice) || 0;
+      const recommendedValue = item.recommendedValue !== null && item.recommendedValue !== undefined
+        ? item.recommendedValue
+        : null;
+      const deltaValue = nextValue - originalValue;
+
+      const stats = document.createElement("div");
+      stats.className = "purchase-warning-stats";
+
+      [
+        { label: "Anterior", value: formatMoney(originalValue) },
+        { label: "Recomendado", value: recommendedValue !== null ? formatMoney(recommendedValue) : "-" },
+        { label: "Nuevo", value: formatMoney(nextValue) },
+        { label: "Diferencia", value: `${deltaValue >= 0 ? "+" : ""}${formatMoney(deltaValue)}`, tone: deltaValue > 0 ? "up" : (deltaValue < 0 ? "down" : "same") },
+      ].forEach((entry) => {
+        const cell = document.createElement("div");
+        cell.className = `purchase-warning-stat${entry.tone ? ` purchase-warning-stat-${entry.tone}` : ""}`;
+
+        const label = document.createElement("span");
+        label.className = "purchase-warning-stat-label";
+        label.textContent = entry.label;
+
+        const value = document.createElement("strong");
+        value.className = "purchase-warning-stat-value";
+        value.textContent = entry.value;
+
+        cell.append(label, value);
+        stats.appendChild(cell);
+      });
+
+      card.append(title, subtitle, stats);
+      purchaseWarningList.appendChild(card);
+    });
+  }
+
+  function openPurchaseConfirmDialog() {
+    const rows = purchaseRowsSnapshot();
+    buildPurchaseConfirmList(rows);
+    buildPurchaseWarningList(rows);
+    if (purchaseConfirmDate) {
+      purchaseConfirmDate.textContent = purchaseForm.querySelector('[name="fecha_compra"]').value || "-";
+    }
+    if (purchaseConfirmNote) {
+      purchaseConfirmNote.textContent = (purchaseForm.querySelector('[name="nota_global"]').value || "").trim() || "Sin nota";
+    }
+    if (purchaseConfirmTotal) {
+      purchaseConfirmTotal.textContent = sumAmount ? sumAmount.textContent : "0.00 €";
+    }
+    showAppDialog(purchaseConfirmDialog);
+  }
+
+  function purchaseRowsSnapshot() {
+    return Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => {
+      const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
+      const qty = row.querySelector('input[name="cantidad[]"]').value || "0";
+      const unitPrice = row.querySelector('input[name="precio_compra[]"]').value || "";
+      const subtotal = row.querySelector('input[name="subtotal_compra[]"]').value || "";
+      const salePrice = row.querySelector('input[name="precio_venta_actual[]"]').value || "";
+      const note = row.querySelector('input[name="nota_linea[]"]').value || "";
+      const stockUnit = row.dataset.stockUnit || "ud";
+      const saleUnit = row.dataset.saleUnit || stockUnit;
+      const fractional = row.dataset.fractional === "1";
+      const fractions = row.dataset.fractions || "1";
+      const pricing = getPurchasePricing({ qty, unitPrice, subtotal, fractional, fractions });
+      return {
+        name,
+        qty,
+        unitPrice,
+        subtotal,
+        salePrice,
+        note,
+        stockUnit,
+        saleUnit,
+        fractional,
+        originalSalePrice: row.dataset.originalSalePrice || "",
+        recommendedValue: pricing.recommendedSalePrice,
+        lineTotal: pricing.lineTotal,
+      };
+    });
+  }
+
   function refreshEmptyState() {
     if (purchaseEmpty) purchaseEmpty.style.display = selectedById.size === 0 ? "" : "none";
     syncSelectedState();
@@ -156,14 +345,20 @@
     const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
     const subtotalPassive = row.querySelector(".purchase-total-passive");
 
+    unitPriceInput.type = isFractional ? "hidden" : "text";
     unitPriceInput.hidden = isFractional;
+    unitPriceInput.style.display = isFractional ? "none" : "";
     unitPricePassive.hidden = !isFractional;
+    unitPricePassive.style.display = isFractional ? "flex" : "none";
     unitPricePassive.setAttribute("aria-hidden", isFractional ? "false" : "true");
-    unitPricePassive.textContent = isFractional ? "Calculado" : "-";
+    unitPricePassive.textContent = "-";
 
+    subtotalInput.type = isFractional ? "text" : "hidden";
     subtotalInput.hidden = !isFractional;
+    subtotalInput.style.display = isFractional ? "" : "none";
     if (subtotalPassive) {
       subtotalPassive.hidden = isFractional;
+      subtotalPassive.style.display = isFractional ? "none" : "flex";
       subtotalPassive.setAttribute("aria-hidden", isFractional ? "true" : "false");
       subtotalPassive.textContent = "-";
     }
@@ -210,6 +405,7 @@
     row.querySelector('input[name="subtotal_compra[]"]').value = data.subtotal || "";
     row.querySelector('input[name="precio_venta_actual[]"]').value = data.salePrice || "";
     row.querySelector('input[name="nota_linea[]"]').value = data.note || "";
+    row.dataset.originalSalePrice = data.originalSalePrice || data.salePrice || "";
     row.dataset.stockUnit = data.stockUnit || "ud";
     row.dataset.saleUnit = data.saleUnit || data.stockUnit || "ud";
     row.dataset.fractional = data.fractional ? "1" : "0";
@@ -280,10 +476,43 @@
     });
   }
 
-  if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
-  if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+  if (purchaseFiltersForm) {
+    const submitFilters = debounce(() => {
+      purchaseFiltersForm.requestSubmit();
+    }, 180);
+    if (searchBox) searchBox.addEventListener("input", submitFilters);
+    if (groupFilter) groupFilter.addEventListener("change", () => purchaseFiltersForm.requestSubmit());
+  } else {
+    if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
+    if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+  }
+
+  if (closePurchaseConfirmDialog && purchaseConfirmDialog) {
+    closePurchaseConfirmDialog.addEventListener("click", () => closeAppDialog(purchaseConfirmDialog));
+    purchaseConfirmDialog.addEventListener("click", (event) => {
+      if (event.target === purchaseConfirmDialog) {
+        closeAppDialog(purchaseConfirmDialog);
+      }
+    });
+  }
+
+  if (confirmPurchaseSubmit) {
+    confirmPurchaseSubmit.addEventListener("click", () => {
+      purchaseConfirmAccepted = true;
+      closeAppDialog(purchaseConfirmDialog);
+      if (typeof purchaseForm.requestSubmit === "function") {
+        purchaseForm.requestSubmit();
+      } else {
+        purchaseForm.submit();
+      }
+    });
+  }
 
   purchaseForm.addEventListener("submit", (event) => {
+    if (purchaseConfirmAccepted) {
+      purchaseConfirmAccepted = false;
+      return;
+    }
     const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
     if (!rows.length) {
       event.preventDefault();
@@ -337,10 +566,16 @@
     if (hasErrors) {
       event.preventDefault();
       alert("Revisa cantidad, precios y subtotales antes de registrar la compra.");
+      return;
     }
+
+    event.preventDefault();
+    openPurchaseConfirmDialog();
   });
 
-  applyProductFilters();
+  if (!purchaseFiltersForm) {
+    applyProductFilters();
+  }
   refreshEmptyState();
   refreshSummary();
 </script>

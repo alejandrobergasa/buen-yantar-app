@@ -17,6 +17,7 @@
             <h2>Nueva factura</h2>
           </a>
 
+          {% if g.is_admin %}
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nueva_compra') }}">
             <span class="home-menu-emoji" aria-hidden="true">🛒</span>
             <h2>Nueva compra</h2>
@@ -26,6 +27,7 @@
             <span class="home-menu-emoji" aria-hidden="true">💸</span>
             <h2>Gasto libre</h2>
           </a>
+          {% endif %}
 
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('inventario') }}">
             <span class="home-menu-emoji" aria-hidden="true">📦</span>
@@ -42,6 +44,7 @@
             <h2>Historial Facturas</h2>
           </a>
 
+          {% if g.is_admin %}
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_compras') }}">
             <span class="home-menu-emoji" aria-hidden="true">🛍️</span>
             <h2>Historial Compras</h2>
@@ -51,6 +54,7 @@
             <span class="home-menu-emoji" aria-hidden="true">💳</span>
             <h2>Historial Gastos</h2>
           </a>
+          {% endif %}
 
           {% if not g.is_admin %}
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('gestion_usuarios') }}">
@@ -120,11 +124,13 @@
       <div class="empty">No hay alertas de stock bajo.</div>
       {% endif %}
 
+      {% if g.is_admin %}
       <div class="home-side-panel-actions">
         <button class="btn btn-primary btn-small" type="button" id="openShoppingListDialog">
           Generar lista de la compra
         </button>
       </div>
+      {% endif %}
     </section>
 
     <section class="panel home-side-panel">
@@ -152,6 +158,7 @@
   </aside>
 </div>
 
+{% if g.is_admin %}
 <dialog class="shopping-dialog" id="shoppingListDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -359,4 +366,5 @@
     printButton.addEventListener("click", printShoppingList);
   })();
 </script>
+{% endif %}
 {% endblock %}

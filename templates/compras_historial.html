@@ -97,6 +97,26 @@
         </tbody>
       </table>
     </div>
+    {% if low_resource_mode %}
+      <div class="help" style="margin-top:0.6rem;">
+        Mostrando {{ history_browser.shown_from }}-{{ history_browser.shown_to }} de {{ history_browser.total }} compras filtradas.
+      </div>
+      {% if history_browser.page_count > 1 %}
+      <div class="actions" style="margin-top:0.45rem;">
+        {% if history_browser.has_prev %}
+          <a class="btn btn-secondary btn-small" href="{{ history_browser.prev_url }}">Anterior</a>
+        {% else %}
+          <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+        {% endif %}
+        <span class="help">Página {{ history_browser.page }} de {{ history_browser.page_count }}</span>
+        {% if history_browser.has_next %}
+          <a class="btn btn-secondary btn-small" href="{{ history_browser.next_url }}">Siguiente</a>
+        {% else %}
+          <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    {% endif %}
   {% endif %}
 </section>
 <script>

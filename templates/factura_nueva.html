@@ -3,6 +3,26 @@
 
 <div class="purchase-layout">
   <section class="panel purchase-left">
+    {% if low_resource_mode %}
+    <form class="inv-filters" method="get" action="{{ url_for('nueva_factura') }}" id="invoiceFiltersForm">
+      <div>
+        <label class="label" for="invoiceSearch">Buscar</label>
+        <input id="invoiceSearch" name="q" class="input" placeholder="Escribe nombre del producto" value="{{ current_filters.q }}">
+      </div>
+      <div>
+        <label class="label" for="invoiceGroup">Grupo</label>
+        <select id="invoiceGroup" name="g">
+          <option value="">(Todos)</option>
+          {% for g, e in group_options %}
+            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="actions">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('nueva_factura') }}">Limpiar</a>
+      </div>
+    </form>
+    {% else %}
     <div class="inv-filters">
       <div>
         <label class="label" for="invoiceSearch">Buscar</label>
@@ -18,6 +38,7 @@
         </select>
       </div>
     </div>
+    {% endif %}
 
     <div class="inv-scrollbox purchase-products-box">
       <table class="table">
@@ -80,6 +101,30 @@
       </table>
       <div class="empty inventory-no-results" id="invoiceNoResults" hidden>No hay productos que coincidan con el filtro.</div>
     </div>
+    {% if low_resource_mode %}
+    <div class="help">
+      {% if product_browser.total %}
+        Mostrando {{ product_browser.shown_from }}-{{ product_browser.shown_to }} de {{ product_browser.total }} productos.
+      {% else %}
+        No hay productos que coincidan con el filtro.
+      {% endif %}
+    </div>
+    {% if product_browser.page_count > 1 %}
+    <div class="actions">
+      {% if product_browser.has_prev %}
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}">Anterior</a>
+      {% else %}
+        <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+      {% endif %}
+      <span class="help">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
+      {% if product_browser.has_next %}
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}">Siguiente</a>
+      {% else %}
+        <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
   </section>
 
   <section class="panel purchase-right">
@@ -145,7 +190,6 @@
   </tr>
 </template>
 
-{% if not low_resource_mode %}
 <dialog class="shopping-dialog invoice-confirm-dialog" id="invoiceConfirmDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -169,7 +213,6 @@
     </div>
   </div>
 </dialog>
-{% endif %}
 
 {% if low_resource_mode %}
   {% include "_factura_nueva_low_script.html" %}
@@ -470,6 +513,29 @@
     });
   }
 
+  function showAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    dialog.setAttribute("open", "open");
+  }
+
+  function closeAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    dialog.removeAttribute("open");
+  }
+
+  function formatMoneyValue(raw) {
+    const value = parseNumber(raw);
+    return value !== null && !Number.isNaN(value) ? `${value.toFixed(2)} €` : "-";
+  }
+
   function buildInvoiceConfirmList(rows) {
     if (!invoiceConfirmList) return;
     invoiceConfirmList.replaceChildren();
@@ -499,7 +565,7 @@
 
       const meta = document.createElement("div");
       meta.className = "invoice-confirm-item-meta";
-      meta.textContent = `Cantidad ${item.qty} ${item.saleUnit} · Precio ${Number.parseFloat(item.price || "0").toFixed(2)} € / ${item.saleUnit}`;
+      meta.textContent = `Cantidad ${item.qty} ${item.saleUnit} · Precio ${formatMoneyValue(item.price)} / ${item.saleUnit}`;
 
       card.append(head, meta);
       invoiceConfirmList.appendChild(card);
@@ -507,7 +573,6 @@
   }
 
   function openInvoiceConfirmDialog() {
-    if (!invoiceConfirmDialog) return;
     const rows = invoiceRowsSnapshot();
     buildInvoiceConfirmList(rows);
     if (invoiceConfirmDate) {
@@ -519,7 +584,7 @@
     if (invoiceConfirmTotal) {
       invoiceConfirmTotal.textContent = sumAmountPinned?.textContent || "0.00 €";
     }
-    invoiceConfirmDialog.showModal();
+    showAppDialog(invoiceConfirmDialog);
   }
 
   async function submitInvoiceConfirmed() {
@@ -693,10 +758,10 @@
 
   {% if not low_resource_mode %}
   if (closeInvoiceConfirmDialog && invoiceConfirmDialog) {
-    closeInvoiceConfirmDialog.addEventListener("click", () => invoiceConfirmDialog.close());
+    closeInvoiceConfirmDialog.addEventListener("click", () => closeAppDialog(invoiceConfirmDialog));
     invoiceConfirmDialog.addEventListener("click", (event) => {
       if (event.target === invoiceConfirmDialog) {
-        invoiceConfirmDialog.close();
+        closeAppDialog(invoiceConfirmDialog);
       }
     });
   }

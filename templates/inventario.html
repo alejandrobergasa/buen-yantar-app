@@ -356,6 +356,7 @@
                       <span>Stock infinito</span>
                     </label>
 
+                    {% if g.is_admin %}
                     <div class="actions" id="detailActionsView">
                       <button class="btn btn-primary" type="button" id="btnEditDetail">Editar producto</button>
                     </div>
@@ -363,22 +364,22 @@
                     <div class="actions" id="detailActionsEdit" style="display:none;">
                       <button class="btn btn-primary" type="submit">Guardar cambios</button>
                       <button class="btn btn-secondary" type="button" id="btnCancelDetail">Cancelar cambios</button>
-                      {% if g.is_admin %}
-                        <button
-                          id="btnDeleteDetail"
-                          class="btn btn-secondary"
-                          type="submit"
-                          formaction="{{ url_for('inventario_eliminar') }}"
-                          formmethod="post"
-                          onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
-                        >
-                          Eliminar producto
-                        </button>
-                      {% endif %}
+                      <button
+                        id="btnDeleteDetail"
+                        class="btn btn-secondary"
+                        type="submit"
+                        formaction="{{ url_for('inventario_eliminar') }}"
+                        formmethod="post"
+                        onclick="return confirm('¿Seguro que quieres eliminar este producto?')"
+                      >
+                        Eliminar producto
+                      </button>
                     </div>
+                    {% endif %}
                   </form>
                 </div>
 
+                {% if g.is_admin %}
                 <aside class="detail-side">
                   <h3 class="panel-title detail-side-title">Precio recomendado</h3>
                   {% if purchase_recommendation %}
@@ -425,6 +426,7 @@
                     {% endif %}
                   </div>
                 </aside>
+                {% endif %}
               </div>
             {% endif %}
           </div>

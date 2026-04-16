@@ -4047,17 +4047,61 @@ body.route-analisis {
 
 .purchase-warning-item {
   display: grid;
-  gap: 0.2rem;
+  gap: 0.45rem;
   padding: 0.68rem 0.76rem;
   border-radius: 0.88rem;
   border: 1px solid rgba(214, 149, 50, 0.18);
   background: linear-gradient(135deg, rgba(255, 247, 232, 0.98), rgba(255, 253, 246, 0.94));
 }
 
+.purchase-warning-title {
+  color: #5c4318;
+}
+
 .purchase-warning-line {
   color: #5a4b2f;
   font-size: 0.88rem;
   font-weight: 700;
+}
+
+.purchase-warning-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.purchase-warning-stat {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.56rem 0.62rem;
+  border-radius: 0.72rem;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(214, 149, 50, 0.14);
+}
+
+.purchase-warning-stat-label {
+  color: #7a6641;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.purchase-warning-stat-value {
+  color: #4f3c14;
+  font-size: 0.94rem;
+}
+
+.purchase-warning-stat-up {
+  background: rgba(255, 237, 191, 0.8);
+}
+
+.purchase-warning-stat-down {
+  background: rgba(247, 244, 205, 0.88);
+}
+
+.purchase-warning-stat-same {
+  background: rgba(255, 250, 230, 0.76);
 }
 
 .route-home .page-intro,

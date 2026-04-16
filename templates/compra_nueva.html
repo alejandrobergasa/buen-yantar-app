@@ -3,6 +3,26 @@
 
 <div class="purchase-layout">
   <section class="panel purchase-left">
+    {% if low_resource_mode %}
+    <form class="inv-filters" method="get" action="{{ url_for('nueva_compra') }}" id="purchaseFiltersForm">
+      <div>
+        <label class="label" for="purchaseSearch">Buscar</label>
+        <input id="purchaseSearch" name="q" class="input" placeholder="Escribe nombre del producto" value="{{ current_filters.q }}">
+      </div>
+      <div>
+        <label class="label" for="purchaseGroup">Grupo</label>
+        <select id="purchaseGroup" name="g">
+          <option value="">(Todos)</option>
+          {% for g, e in group_options %}
+            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="actions">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('nueva_compra') }}">Limpiar</a>
+      </div>
+    </form>
+    {% else %}
     <div class="inv-filters">
       <div>
         <label class="label" for="purchaseSearch">Buscar</label>
@@ -18,6 +38,7 @@
         </select>
       </div>
     </div>
+    {% endif %}
 
     <div class="inv-scrollbox purchase-products-box">
       <table class="table">
@@ -80,6 +101,30 @@
       </table>
       <div class="empty inventory-no-results" id="purchaseNoResults" hidden>No hay productos que coincidan con el filtro.</div>
     </div>
+    {% if low_resource_mode %}
+    <div class="help">
+      {% if product_browser.total %}
+        Mostrando {{ product_browser.shown_from }}-{{ product_browser.shown_to }} de {{ product_browser.total }} productos.
+      {% else %}
+        No hay productos que coincidan con el filtro.
+      {% endif %}
+    </div>
+    {% if product_browser.page_count > 1 %}
+    <div class="actions">
+      {% if product_browser.has_prev %}
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}">Anterior</a>
+      {% else %}
+        <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+      {% endif %}
+      <span class="help">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
+      {% if product_browser.has_next %}
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}">Siguiente</a>
+      {% else %}
+        <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
   </section>
 
   <section class="panel purchase-right">
@@ -136,11 +181,11 @@
       <input class="input input-num js-purchase-field" name="cantidad[]" data-rule="positive-number" placeholder="0">
     </td>
     <td class="right purchase-col-unit">
-      <input class="input input-num js-purchase-field" name="precio_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
+      <input type="text" class="input input-num js-purchase-field" name="precio_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
       <div class="purchase-price-passive" hidden aria-hidden="true">-</div>
     </td>
     <td class="right purchase-col-total">
-      <input class="input input-num js-purchase-field" name="subtotal_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
+      <input type="text" class="input input-num js-purchase-field" name="subtotal_compra[]" data-rule="non-negative-number-or-empty" placeholder="0.00">
       <div class="purchase-total-passive" hidden aria-hidden="true">-</div>
     </td>
     <td class="right purchase-col-current">
@@ -158,7 +203,6 @@
   </tr>
 </template>
 
-{% if not low_resource_mode %}
 <dialog class="shopping-dialog purchase-confirm-dialog" id="purchaseConfirmDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -184,7 +228,7 @@
 
       <section class="shopping-dialog-panel">
         <div class="shopping-dialog-panel-head">
-          <strong>Actualizaciones de precio de venta</strong>
+          <strong>🟡 Cambios de precio de venta</strong>
         </div>
         <div class="shopping-dialog-list purchase-warning-list" id="purchaseWarningList"></div>
       </section>
@@ -196,7 +240,6 @@
     </div>
   </div>
 </dialog>
-{% endif %}
 
 {% if low_resource_mode %}
   {% include "_compra_nueva_low_script.html" %}
@@ -434,14 +477,21 @@
     const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
     const subtotalPassive = row.querySelector(".purchase-total-passive");
 
+    unitPriceInput.type = isFractional ? "hidden" : "text";
     unitPriceInput.hidden = isFractional;
+    unitPriceInput.style.display = isFractional ? "none" : "";
     unitPricePassive.hidden = !isFractional;
+    unitPricePassive.style.display = isFractional ? "flex" : "none";
     unitPricePassive.setAttribute("aria-hidden", isFractional ? "false" : "true");
+    unitPricePassive.textContent = "-";
     unitPriceInput.dataset.rule = "non-negative-number-or-empty";
 
+    subtotalInput.type = isFractional ? "text" : "hidden";
     subtotalInput.hidden = !isFractional;
+    subtotalInput.style.display = isFractional ? "" : "none";
     if (subtotalPassive) {
       subtotalPassive.hidden = isFractional;
+      subtotalPassive.style.display = isFractional ? "none" : "flex";
       subtotalPassive.setAttribute("aria-hidden", isFractional ? "true" : "false");
       subtotalPassive.textContent = "-";
     }
@@ -623,6 +673,7 @@
         subtotal,
         salePrice,
         recommended,
+        recommendedValue: pricing.recommendedSalePrice,
         note,
         originalSalePrice,
         stockUnit,
@@ -633,6 +684,24 @@
         unitPurchasePrice: pricing.unitPurchasePrice,
       };
     });
+  }
+
+  function showAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    dialog.setAttribute("open", "open");
+  }
+
+  function closeAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    dialog.removeAttribute("open");
   }
 
   function buildPurchaseConfirmList(rows) {
@@ -707,29 +776,50 @@
       card.className = "purchase-warning-item";
 
       const title = document.createElement("strong");
+      title.className = "purchase-warning-title";
       title.textContent = item.name;
 
-      const previous = document.createElement("div");
-      previous.className = "purchase-warning-line";
-      previous.textContent = `Precio anterior: ${formatMoney(parseNumber(item.originalSalePrice) || 0)} / ${item.saleUnit} - Precio recomendado: ${item.recommended}`;
+      const subtitle = document.createElement("div");
+      subtitle.className = "purchase-warning-line";
+      subtitle.textContent = `Venta en ${item.saleUnit}`;
 
-      const next = document.createElement("div");
-      next.className = "purchase-warning-line";
+      const originalValue = parseNumber(item.originalSalePrice) || 0;
+      const nextValue = parseNumber(item.salePrice) || 0;
+      const recommendedValue = item.recommendedValue !== null && item.recommendedValue !== undefined
+        ? item.recommendedValue
+        : null;
+      const deltaValue = nextValue - originalValue;
 
-      const nextLabel = document.createElement("span");
-      nextLabel.textContent = `Nuevo precio / ${item.saleUnit}: `;
+      const stats = document.createElement("div");
+      stats.className = "purchase-warning-stats";
 
-      const nextValue = document.createElement("strong");
-      nextValue.textContent = formatMoney(parseNumber(item.salePrice) || 0);
+      [
+        { label: "Anterior", value: formatMoney(originalValue) },
+        { label: "Recomendado", value: recommendedValue !== null ? formatMoney(recommendedValue) : "-" },
+        { label: "Nuevo", value: formatMoney(nextValue) },
+        { label: "Diferencia", value: `${deltaValue >= 0 ? "+" : ""}${formatMoney(deltaValue)}`, tone: deltaValue > 0 ? "up" : (deltaValue < 0 ? "down" : "same") },
+      ].forEach((entry) => {
+        const cell = document.createElement("div");
+        cell.className = `purchase-warning-stat${entry.tone ? ` purchase-warning-stat-${entry.tone}` : ""}`;
 
-      next.append(nextLabel, nextValue);
-      card.append(title, previous, next);
+        const label = document.createElement("span");
+        label.className = "purchase-warning-stat-label";
+        label.textContent = entry.label;
+
+        const value = document.createElement("strong");
+        value.className = "purchase-warning-stat-value";
+        value.textContent = entry.value;
+
+        cell.append(label, value);
+        stats.appendChild(cell);
+      });
+
+      card.append(title, subtitle, stats);
       purchaseWarningList.appendChild(card);
     });
   }
 
   function openPurchaseConfirmDialog() {
-    if (!purchaseConfirmDialog) return;
     const rows = purchaseRowsSnapshot();
     buildPurchaseConfirmList(rows);
     buildPurchaseWarningList(rows);
@@ -742,7 +832,7 @@
     if (purchaseConfirmTotal) {
       purchaseConfirmTotal.textContent = sumAmount?.textContent || "0.00 €";
     }
-    purchaseConfirmDialog.showModal();
+    showAppDialog(purchaseConfirmDialog);
   }
 
   async function submitPurchaseConfirmed() {
@@ -923,10 +1013,10 @@
 
   {% if not low_resource_mode %}
   if (closePurchaseConfirmDialog && purchaseConfirmDialog) {
-    closePurchaseConfirmDialog.addEventListener("click", () => purchaseConfirmDialog.close());
+    closePurchaseConfirmDialog.addEventListener("click", () => closeAppDialog(purchaseConfirmDialog));
     purchaseConfirmDialog.addEventListener("click", (event) => {
       if (event.target === purchaseConfirmDialog) {
-        purchaseConfirmDialog.close();
+        closeAppDialog(purchaseConfirmDialog);
       }
     });
   }

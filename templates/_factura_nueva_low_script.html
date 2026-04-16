@@ -34,6 +34,7 @@
 
   const searchBox = document.getElementById("invoiceSearch");
   const groupFilter = document.getElementById("invoiceGroup");
+  const invoiceFiltersForm = document.getElementById("invoiceFiltersForm");
   const productRows = Array.from(document.querySelectorAll(".invoice-product-row"));
   const invoiceProductsTbody = document.getElementById("invoiceProductsTbody");
   const noResultsBox = document.getElementById("invoiceNoResults");
@@ -44,7 +45,15 @@
   const hiddenFQ = document.getElementById("invoiceFQ");
   const hiddenFG = document.getElementById("invoiceFG");
   const sumAmountPinned = document.getElementById("sumAmountPinned");
+  const invoiceConfirmDialog = document.getElementById("invoiceConfirmDialog");
+  const closeInvoiceConfirmDialog = document.getElementById("closeInvoiceConfirmDialog");
+  const confirmInvoiceSubmit = document.getElementById("confirmInvoiceSubmit");
+  const invoiceConfirmList = document.getElementById("invoiceConfirmList");
+  const invoiceConfirmDate = document.getElementById("invoiceConfirmDate");
+  const invoiceConfirmNote = document.getElementById("invoiceConfirmNote");
+  const invoiceConfirmTotal = document.getElementById("invoiceConfirmTotal");
   const selectedById = new Map();
+  let invoiceConfirmAccepted = false;
 
   function productDataFromRow(sourceRow) {
     return {
@@ -87,6 +96,91 @@
       updateLineAmount(row);
     });
     if (sumAmountPinned) sumAmountPinned.textContent = `${total.toFixed(2)} €`;
+  }
+
+  function showAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    dialog.setAttribute("open", "open");
+  }
+
+  function closeAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    dialog.removeAttribute("open");
+  }
+
+  function invoiceRowsSnapshot() {
+    return Array.from(invoiceLines.querySelectorAll(".invoice-row")).map((row) => {
+      const name = row.querySelector(".ticket-product-name")?.textContent?.trim() || "-";
+      const qty = row.querySelector('input[name="cantidad[]"]').value || "0";
+      const price = row.querySelector('input[name="precio_unitario[]"]').value || "0";
+      const amount = row.querySelector(".js-line-amount")?.textContent?.trim() || "0.00 €";
+      const saleUnit = row.dataset.saleUnit || "ud";
+      return { name, qty, price, amount, saleUnit };
+    });
+  }
+
+  function formatMoneyValue(raw) {
+    const value = parseNumber(raw);
+    return value !== null && !Number.isNaN(value) ? `${value.toFixed(2)} €` : "-";
+  }
+
+  function buildInvoiceConfirmList(rows) {
+    if (!invoiceConfirmList) return;
+    invoiceConfirmList.replaceChildren();
+
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "No hay líneas para confirmar.";
+      invoiceConfirmList.appendChild(empty);
+      return;
+    }
+
+    rows.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "invoice-confirm-item";
+
+      const head = document.createElement("div");
+      head.className = "invoice-confirm-item-head";
+
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+
+      const amount = document.createElement("span");
+      amount.textContent = item.amount;
+
+      head.append(title, amount);
+
+      const meta = document.createElement("div");
+      meta.className = "invoice-confirm-item-meta";
+      meta.textContent = `Cantidad ${item.qty} ${item.saleUnit} · Precio ${formatMoneyValue(item.price)} / ${item.saleUnit}`;
+
+      card.append(head, meta);
+      invoiceConfirmList.appendChild(card);
+    });
+  }
+
+  function openInvoiceConfirmDialog() {
+    const rows = invoiceRowsSnapshot();
+    buildInvoiceConfirmList(rows);
+    if (invoiceConfirmDate) {
+      invoiceConfirmDate.textContent = invoiceForm.querySelector('[name="fecha_factura"]').value || "-";
+    }
+    if (invoiceConfirmNote) {
+      invoiceConfirmNote.textContent = (invoiceForm.querySelector('[name="nota_global"]').value || "").trim() || "Sin nota";
+    }
+    if (invoiceConfirmTotal) {
+      invoiceConfirmTotal.textContent = sumAmountPinned ? sumAmountPinned.textContent : "0.00 €";
+    }
+    showAppDialog(invoiceConfirmDialog);
   }
 
   function refreshEmptyState() {
@@ -188,10 +282,43 @@
     });
   }
 
-  if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
-  if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+  if (invoiceFiltersForm) {
+    const submitFilters = debounce(() => {
+      invoiceFiltersForm.requestSubmit();
+    }, 180);
+    if (searchBox) searchBox.addEventListener("input", submitFilters);
+    if (groupFilter) groupFilter.addEventListener("change", () => invoiceFiltersForm.requestSubmit());
+  } else {
+    if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
+    if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
+  }
+
+  if (closeInvoiceConfirmDialog && invoiceConfirmDialog) {
+    closeInvoiceConfirmDialog.addEventListener("click", () => closeAppDialog(invoiceConfirmDialog));
+    invoiceConfirmDialog.addEventListener("click", (event) => {
+      if (event.target === invoiceConfirmDialog) {
+        closeAppDialog(invoiceConfirmDialog);
+      }
+    });
+  }
+
+  if (confirmInvoiceSubmit) {
+    confirmInvoiceSubmit.addEventListener("click", () => {
+      invoiceConfirmAccepted = true;
+      closeAppDialog(invoiceConfirmDialog);
+      if (typeof invoiceForm.requestSubmit === "function") {
+        invoiceForm.requestSubmit();
+      } else {
+        invoiceForm.submit();
+      }
+    });
+  }
 
   invoiceForm.addEventListener("submit", (event) => {
+    if (invoiceConfirmAccepted) {
+      invoiceConfirmAccepted = false;
+      return;
+    }
     const rows = Array.from(invoiceLines.querySelectorAll(".invoice-row"));
     if (!rows.length) {
       event.preventDefault();
@@ -213,10 +340,16 @@
     if (hasErrors) {
       event.preventDefault();
       alert("Revisa las cantidades antes de registrar la factura.");
+      return;
     }
+
+    event.preventDefault();
+    openInvoiceConfirmDialog();
   });
 
-  applyProductFilters();
+  if (!invoiceFiltersForm) {
+    applyProductFilters();
+  }
   refreshEmptyState();
   refreshSummary();
 </script>

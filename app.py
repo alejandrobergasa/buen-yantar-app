@@ -70,6 +70,7 @@ from services.inventory import (
 from services.invoices import (
     INVOICE_HEADERS, INVOICE_LINE_HEADERS,
     create_invoice, list_invoices, list_invoice_lines,
+    list_invoice_lines_for_ids,
     find_invoice, list_invoice_lines_for,
 )
 from services.receipt_printer import format_invoice_ticket, format_shopping_list_ticket, print_text_ticket
@@ -162,6 +163,14 @@ def create_app() -> Flask:
             return redirect(url_for("home"))
         return None
 
+    def require_admin_json(message: str = "Acceso solo para administradores."):
+        r = require_login()
+        if r:
+            return jsonify({"ok": False, "error": "Sesion no valida."}), 401
+        if not user_is_admin():
+            return jsonify({"ok": False, "error": message}), 403
+        return None
+
     @app.before_request
     def inject_user_context():
         u = current_user_row()
@@ -202,6 +211,24 @@ def create_app() -> Flask:
         if current["g"]:
             params["g"] = current["g"]
         return redirect(url_for(endpoint, **params))
+
+    def simple_browser_state(endpoint: str, current_filters: dict[str, str], total: int) -> dict[str, object]:
+        return {
+            "page": 1,
+            "page_count": 1,
+            "per_page": total,
+            "total": total,
+            "shown_from": 1 if total else 0,
+            "shown_to": total,
+            "has_prev": False,
+            "has_next": False,
+            "prev_url": "",
+            "next_url": "",
+            "current_url": url_for(
+                endpoint,
+                **{key: value for key, value in current_filters.items() if value},
+            ),
+        }
 
     def parse_decimal(raw: str) -> float:
         t = (raw or "").strip().replace(" ", "")
@@ -1466,44 +1493,53 @@ def create_app() -> Flask:
                     "href": url_for("nueva_factura"),
                     "endpoints": {"nueva_factura", "nueva_factura_post", "historial_facturas", "imprimir_factura"},
                 },
-                {
-                    "label": "Compras",
-                    "href": url_for("nueva_compra"),
-                    "endpoints": {"nueva_compra", "nueva_compra_post", "historial_compras"},
-                },
-                {
-                    "label": "Gastos",
-                    "href": url_for("nuevo_gasto_libre"),
-                    "endpoints": {
-                        "nuevo_gasto_libre",
-                        "nuevo_gasto_libre_post",
-                        "historial_gastos_libres",
-                        "export_historial_gastos_libres",
+            ]
+            if getattr(g, "is_admin", False):
+                nav_items.extend([
+                    {
+                        "label": "Compras",
+                        "href": url_for("nueva_compra"),
+                        "endpoints": {"nueva_compra", "nueva_compra_post", "historial_compras"},
                     },
-                },
+                    {
+                        "label": "Gastos",
+                        "href": url_for("nuevo_gasto_libre"),
+                        "endpoints": {
+                            "nuevo_gasto_libre",
+                            "nuevo_gasto_libre_post",
+                            "historial_gastos_libres",
+                            "export_historial_gastos_libres",
+                        },
+                    },
+                ])
+            nav_items.append(
                 {
                     "label": settings_label,
                     "href": settings_href,
-                    "endpoints": {
-                        "gestion_usuarios",
-                        "cambiar_password",
-                        "crear_usuario",
-                        "eliminar_usuario",
-                        "configuracion",
-                        "configuracion_caja",
-                        "configuracion_usuarios",
-                        "configuracion_grupos",
-                        "configuracion_migracion",
-                        "configuracion_logs",
-                        "actualizar_saldo_caja",
-                        "crear_grupo_config",
-                        "reasignar_grupo_config",
-                        "eliminar_grupo_config",
-                        "ejecutar_migracion_legacy",
-                        "supervision",
-                    },
-                },
-            ]
+                    "endpoints": (
+                        {
+                            "gestion_usuarios",
+                            "cambiar_password",
+                            "crear_usuario",
+                            "eliminar_usuario",
+                            "configuracion",
+                            "configuracion_caja",
+                            "configuracion_usuarios",
+                            "configuracion_grupos",
+                            "configuracion_migracion",
+                            "configuracion_logs",
+                            "actualizar_saldo_caja",
+                            "crear_grupo_config",
+                            "reasignar_grupo_config",
+                            "eliminar_grupo_config",
+                            "ejecutar_migracion_legacy",
+                            "supervision",
+                        }
+                        if getattr(g, "is_admin", False)
+                        else {"gestion_usuarios", "cambiar_password"}
+                    ),
+                }
+            )
 
         return {
             "shell_nav_items": nav_items,
@@ -1961,6 +1997,7 @@ def create_app() -> Flask:
         if r:
             return r
 
+        is_admin_user = user_is_admin()
         products_all = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
         snapshot = inventory_snapshot(products_all, stock_map)
@@ -2003,23 +2040,12 @@ def create_app() -> Flask:
         )
 
         invoices = list_invoices(config.CSV_FACTURAS, limit=6)
-        if not user_is_admin():
+        if not is_admin_user:
             me = (session.get("user") or "").strip().lower()
             invoices = [
                 row for row in invoices
                 if (row.get("usuario") or "").strip().lower() == me
             ]
-
-        product_names = {
-            p.get("producto_id", ""): p.get("nombre", "")
-            for p in products_all
-        }
-        tickets, _ = list_purchase_history(
-            config.CSV_MOVS,
-            product_names=product_names,
-            limit=6,
-        )
-        free_expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=6)
 
         recent_activity = []
         for inv in invoices:
@@ -2034,40 +2060,51 @@ def create_app() -> Flask:
                 "sort_key": inv.get("fecha", ""),
                 "href": url_for("historial_facturas", q=inv.get("factura_id", "")),
             })
-        for ticket in tickets:
-            amount = safe_float(ticket.get("total_importe"))
-            recent_activity.append({
-                "icon": "🛒",
-                "label": "Compra",
-                "user": (ticket.get("usuario") or "").strip() or "-",
-                "date": (ticket.get("fecha") or "")[:10],
-                "cash_delta": f"-{amount:.2f} €",
-                "cash_delta_class": "home-compact-delta-negative",
-                "sort_key": ticket.get("fecha", ""),
-                "href": url_for("historial_compras", q=ticket.get("ref_id", "")),
-            })
-        for expense in free_expenses:
-            amount = safe_float(expense.get("importe"))
-            recent_activity.append({
-                "icon": "💸",
-                "label": "Gasto",
-                "user": (expense.get("usuario") or "").strip() or "-",
-                "date": (expense.get("fecha") or "")[:10],
-                "cash_delta": f"-{amount:.2f} €",
-                "cash_delta_class": "home-compact-delta-negative",
-                "sort_key": expense.get("fecha", ""),
-                "href": url_for("historial_gastos_libres", q=expense.get("gasto_id", "")),
-            })
+        if is_admin_user:
+            product_names = {
+                p.get("producto_id", ""): p.get("nombre", "")
+                for p in products_all
+            }
+            tickets, _ = list_purchase_history(
+                config.CSV_MOVS,
+                product_names=product_names,
+                limit=6,
+            )
+            free_expenses = list_free_expenses(config.CSV_GASTOS_LIBRES, limit=6)
+            for ticket in tickets:
+                amount = safe_float(ticket.get("total_importe"))
+                recent_activity.append({
+                    "icon": "🛒",
+                    "label": "Compra",
+                    "user": (ticket.get("usuario") or "").strip() or "-",
+                    "date": (ticket.get("fecha") or "")[:10],
+                    "cash_delta": f"-{amount:.2f} €",
+                    "cash_delta_class": "home-compact-delta-negative",
+                    "sort_key": ticket.get("fecha", ""),
+                    "href": url_for("historial_compras", q=ticket.get("ref_id", "")),
+                })
+            for expense in free_expenses:
+                amount = safe_float(expense.get("importe"))
+                recent_activity.append({
+                    "icon": "💸",
+                    "label": "Gasto",
+                    "user": (expense.get("usuario") or "").strip() or "-",
+                    "date": (expense.get("fecha") or "")[:10],
+                    "cash_delta": f"-{amount:.2f} €",
+                    "cash_delta_class": "home-compact-delta-negative",
+                    "sort_key": expense.get("fecha", ""),
+                    "href": url_for("historial_gastos_libres", q=expense.get("gasto_id", "")),
+                })
         recent_activity.sort(key=lambda row: row.get("sort_key", ""), reverse=True)
 
         return render_template(
             "home.html",
             title="Pantalla principal",
             home_stats=snapshot,
-            cash_state=get_cashbox_state(config.CSV_CAJA) if user_is_admin() else None,
+            cash_state=get_cashbox_state(config.CSV_CAJA) if is_admin_user else None,
             recent_activity=recent_activity[:6],
             attention_products=attention_products,
-            shopping_products=shopping_products,
+            shopping_products=shopping_products if is_admin_user else [],
         )
 
     @app.get("/analisis")
@@ -2214,9 +2251,9 @@ def create_app() -> Flask:
 
     @app.post("/listas/compra/imprimir")
     def imprimir_lista_compra():
-        r = require_login()
+        r = require_admin_json()
         if r:
-            return jsonify({"ok": False, "error": "Sesion no valida."}), 401
+            return r
 
         payload = request.get_json(silent=True) or {}
         raw_ids = payload.get("product_ids") or []
@@ -2371,35 +2408,36 @@ def create_app() -> Flask:
             sel_inf = (selected.get("stock_infinito", "0") == "1")
             selected_stock = None if sel_inf else stock_map.get(producto_id, 0.0)
             selected_sale_stock = None if selected_stock is None else stock_quantity_to_sale_quantity(selected, selected_stock)
-            selected_purchases = last_purchases_for_product(
-                config.CSV_MOVS,
-                producto_id,
-                limit=page_limit(300, 80),
-            )
-            latest_purchase_price = 0.0
-            latest_purchase_date = ""
-            for movement in selected_purchases:
-                raw_price = extract_note_value(movement.get("nota", ""), "€/u:")
-                price_value = safe_float(raw_price)
-                if price_value > 0:
-                    latest_purchase_price = price_value
-                    latest_purchase_date = (movement.get("fecha") or "")[:10]
-                    break
-            if latest_purchase_price > 0:
-                recommendation_price = latest_purchase_price
-                recommendation_unit = stock_unit_label(selected)
-                purchase_reference = ""
-                if product_is_fractionable(selected):
-                    recommendation_price = latest_purchase_price / product_fraction_count(selected)
-                    recommendation_unit = sale_unit_label(selected)
-                    purchase_reference = f"Ultima compra registrada: {latest_purchase_price:.2f} € / {stock_unit_label(selected)}"
-                purchase_recommendation = {
-                    "ultima_compra": recommendation_price,
-                    "recomendado": round(recommendation_price * 1.2, 2),
-                    "fecha": latest_purchase_date,
-                    "unidad": recommendation_unit,
-                    "referencia_compra": purchase_reference,
-                }
+            if user_is_admin():
+                selected_purchases = last_purchases_for_product(
+                    config.CSV_MOVS,
+                    producto_id,
+                    limit=page_limit(300, 80),
+                )
+                latest_purchase_price = 0.0
+                latest_purchase_date = ""
+                for movement in selected_purchases:
+                    raw_price = extract_note_value(movement.get("nota", ""), "€/u:")
+                    price_value = safe_float(raw_price)
+                    if price_value > 0:
+                        latest_purchase_price = price_value
+                        latest_purchase_date = (movement.get("fecha") or "")[:10]
+                        break
+                if latest_purchase_price > 0:
+                    recommendation_price = latest_purchase_price
+                    recommendation_unit = stock_unit_label(selected)
+                    purchase_reference = ""
+                    if product_is_fractionable(selected):
+                        recommendation_price = latest_purchase_price / product_fraction_count(selected)
+                        recommendation_unit = sale_unit_label(selected)
+                        purchase_reference = f"Ultima compra registrada: {latest_purchase_price:.2f} € / {stock_unit_label(selected)}"
+                    purchase_recommendation = {
+                        "ultima_compra": recommendation_price,
+                        "recomendado": round(recommendation_price * 1.2, 2),
+                        "fecha": latest_purchase_date,
+                        "unidad": recommendation_unit,
+                        "referencia_compra": purchase_reference,
+                    }
 
         inventory_summary = {
             "total_products": len(rows),
@@ -2526,7 +2564,7 @@ def create_app() -> Flask:
 
     @app.post("/inventario/editar")
     def inventario_editar():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -2681,14 +2719,25 @@ def create_app() -> Flask:
             if (not query or query in normalize_text_search(row["nombre"]))
             and (not group_name or row["grupo"] == group_name)
         ]
+        if config.LOW_RESOURCE_MODE:
+            visible_product_options, product_browser = paginate_rows(
+                filtered_product_options,
+                per_page=24,
+                endpoint="nueva_factura",
+                current_filters=current_filters,
+            )
+        else:
+            visible_product_options = filtered_product_options
+            product_browser = simple_browser_state("nueva_factura", current_filters, len(filtered_product_options))
 
         return render_template(
             "factura_nueva.html",
             title="Nueva factura",
-            products=filtered_product_options,
+            products=visible_product_options,
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
+            product_browser=product_browser,
             form_summary={
                 "total_products": len(product_options),
                 "groups": len(group_options),
@@ -2824,7 +2873,7 @@ def create_app() -> Flask:
         if r:
             return r
 
-        invoices = list_invoices(config.CSV_FACTURAS, limit=page_limit(400, 120))
+        invoices = list_invoices(config.CSV_FACTURAS, limit=0 if config.LOW_RESOURCE_MODE else 400)
         current_q = (request.args.get("q") or "").strip()
         current_from = (request.args.get("from") or "").strip()
         current_to = (request.args.get("to") or "").strip()
@@ -2851,17 +2900,35 @@ def create_app() -> Flask:
                 if (row.get("usuario") or "").strip().lower() == me
             ]
 
+        if config.LOW_RESOURCE_MODE:
+            visible_invoices, history_browser = paginate_rows(
+                invoices,
+                per_page=40,
+                endpoint="historial_facturas",
+                current_filters={
+                    "q": current_q,
+                    "from": current_from,
+                    "to": current_to,
+                },
+            )
+        else:
+            visible_invoices = invoices
+            history_browser = simple_browser_state(
+                "historial_facturas",
+                {
+                    "q": current_q,
+                    "from": current_from,
+                    "to": current_to,
+                },
+                len(invoices),
+            )
+
         invoice_ids = {
             (row.get("factura_id") or "").strip()
-            for row in invoices
+            for row in visible_invoices
             if (row.get("factura_id") or "").strip()
         }
-        lines_map: dict[str, list[dict[str, str]]] = {}
-        if invoice_ids:
-            for line in list_invoice_lines(config.CSV_FACTURA_LINEAS):
-                fid = (line.get("factura_id") or "").strip()
-                if fid in invoice_ids:
-                    lines_map.setdefault(fid, []).append(line)
+        lines_map = list_invoice_lines_for_ids(config.CSV_FACTURA_LINEAS, invoice_ids)
 
         history_summary = {
             "count": len(invoices),
@@ -2873,17 +2940,18 @@ def create_app() -> Flask:
         return render_template(
             "facturas_historial.html",
             title="Historial facturas",
-            invoices=invoices,
+            invoices=visible_invoices,
             lines_map=lines_map,
             current_q=current_q,
             current_from=current_from,
             current_to=current_to,
             history_summary=history_summary,
+            history_browser=history_browser,
         )
 
     @app.get("/facturas/historial/export")
     def export_historial_facturas():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -2906,13 +2974,6 @@ def create_app() -> Flask:
                 row for row in invoices
                 if matches_date_window(row.get("fecha", ""), current_from, current_to)
             ]
-        if not user_is_admin():
-            me = (session.get("user") or "").strip().lower()
-            invoices = [
-                row for row in invoices
-                if (row.get("usuario") or "").strip().lower() == me
-            ]
-
         rows = [
             {
                 "fecha": row.get("fecha", ""),
@@ -2933,7 +2994,7 @@ def create_app() -> Flask:
 
     @app.post("/facturas/<factura_id>/imprimir")
     def imprimir_factura(factura_id: str):
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -2948,13 +3009,6 @@ def create_app() -> Flask:
             flash("Factura no encontrada.")
             return redirect(url_for("historial_facturas", **redirect_params))
 
-        if not user_is_admin():
-            me = (session.get("user") or "").strip().lower()
-            owner = (invoice.get("usuario") or "").strip().lower()
-            if owner != me:
-                flash("No puedes imprimir facturas de otro usuario.")
-                return redirect(url_for("historial_facturas", **redirect_params))
-
         try:
             print_invoice_ticket(factura_id)
             flash(f"Factura {factura_id} enviada a la impresora.")
@@ -2965,7 +3019,7 @@ def create_app() -> Flask:
 
     @app.get("/compras/historial")
     def historial_compras():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -2974,7 +3028,7 @@ def create_app() -> Flask:
         tickets, lines_map = list_purchase_history(
             config.CSV_MOVS,
             product_names=product_names,
-            limit=page_limit(500, 150),
+            limit=0 if config.LOW_RESOURCE_MODE else 500,
         )
         current_q = (request.args.get("q") or "").strip()
         current_from = (request.args.get("from") or "").strip()
@@ -2996,6 +3050,38 @@ def create_app() -> Flask:
                 t for t in tickets
                 if matches_date_window(t.get("fecha", ""), current_from, current_to)
             ]
+        if config.LOW_RESOURCE_MODE:
+            visible_tickets, history_browser = paginate_rows(
+                tickets,
+                per_page=40,
+                endpoint="historial_compras",
+                current_filters={
+                    "q": current_q,
+                    "from": current_from,
+                    "to": current_to,
+                },
+            )
+        else:
+            visible_tickets = tickets
+            history_browser = simple_browser_state(
+                "historial_compras",
+                {
+                    "q": current_q,
+                    "from": current_from,
+                    "to": current_to,
+                },
+                len(tickets),
+            )
+        visible_ticket_ids = {
+            (ticket.get("ref_id") or "").strip()
+            for ticket in visible_tickets
+            if (ticket.get("ref_id") or "").strip()
+        }
+        lines_map = {
+            ref_id: lines
+            for ref_id, lines in lines_map.items()
+            if ref_id in visible_ticket_ids
+        }
 
         history_summary = {
             "count": len(tickets),
@@ -3007,17 +3093,18 @@ def create_app() -> Flask:
         return render_template(
             "compras_historial.html",
             title="Historial compras",
-            tickets=tickets,
+            tickets=visible_tickets,
             lines_map=lines_map,
             current_q=current_q,
             current_from=current_from,
             current_to=current_to,
             history_summary=history_summary,
+            history_browser=history_browser,
         )
 
     @app.get("/compras/historial/export")
     def export_historial_compras():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -3096,7 +3183,7 @@ def create_app() -> Flask:
 
     @app.get("/compra/nueva")
     def nueva_compra():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -3147,14 +3234,25 @@ def create_app() -> Flask:
             if (not query or query in normalize_text_search(row["nombre"]))
             and (not group_name or row["grupo"] == group_name)
         ]
+        if config.LOW_RESOURCE_MODE:
+            visible_product_options, product_browser = paginate_rows(
+                filtered_product_options,
+                per_page=24,
+                endpoint="nueva_compra",
+                current_filters=current_filters,
+            )
+        else:
+            visible_product_options = filtered_product_options
+            product_browser = simple_browser_state("nueva_compra", current_filters, len(filtered_product_options))
 
         return render_template(
             "compra_nueva.html",
             title="Nueva compra",
-            products=filtered_product_options,
+            products=visible_product_options,
             group_options=group_options,
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
+            product_browser=product_browser,
             form_summary={
                 "total_products": len(product_options),
                 "groups": len(group_options),
@@ -3165,7 +3263,7 @@ def create_app() -> Flask:
 
     @app.post("/compra/nueva")
     def nueva_compra_post():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
         wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -3307,7 +3405,7 @@ def create_app() -> Flask:
 
     @app.get("/gastos/nuevo")
     def nuevo_gasto_libre():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -3323,7 +3421,7 @@ def create_app() -> Flask:
 
     @app.post("/gastos/nuevo")
     def nuevo_gasto_libre_post():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
         wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -3388,7 +3486,7 @@ def create_app() -> Flask:
 
     @app.get("/gastos/historial")
     def historial_gastos_libres():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 
@@ -3438,7 +3536,7 @@ def create_app() -> Flask:
 
     @app.get("/gastos/historial/export")
     def export_historial_gastos_libres():
-        r = require_login()
+        r = require_admin()
         if r:
             return r
 

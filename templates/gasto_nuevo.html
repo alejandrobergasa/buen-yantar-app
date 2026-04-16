@@ -99,6 +99,24 @@
   const toastKey = "buen-yantar:toast";
   let freeExpenseSubmitting = false;
 
+  function showAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    dialog.setAttribute("open", "open");
+  }
+
+  function closeAppDialog(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function") {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    dialog.removeAttribute("open");
+  }
+
   function buildFreeExpenseConfirm() {
     const dateValue = freeExpenseForm.querySelector('[name="fecha_gasto"]').value || "-";
     const categorySelect = freeExpenseForm.querySelector('[name="categoria"]');
@@ -123,6 +141,11 @@
 
     card.append(title, meta);
     freeExpenseConfirmList.appendChild(card);
+  }
+
+  function openFreeExpenseConfirm() {
+    buildFreeExpenseConfirm();
+    showAppDialog(freeExpenseConfirmDialog);
   }
 
   async function submitFreeExpenseConfirmed() {
@@ -162,10 +185,10 @@
   }
 
   if (closeFreeExpenseConfirmDialog && freeExpenseConfirmDialog) {
-    closeFreeExpenseConfirmDialog.addEventListener("click", () => freeExpenseConfirmDialog.close());
+    closeFreeExpenseConfirmDialog.addEventListener("click", () => closeAppDialog(freeExpenseConfirmDialog));
     freeExpenseConfirmDialog.addEventListener("click", (event) => {
       if (event.target === freeExpenseConfirmDialog) {
-        freeExpenseConfirmDialog.close();
+        closeAppDialog(freeExpenseConfirmDialog);
       }
     });
   }
@@ -197,8 +220,7 @@
       return;
     }
     e.preventDefault();
-    buildFreeExpenseConfirm();
-    freeExpenseConfirmDialog.showModal();
+    openFreeExpenseConfirm();
   });
 </script>
 {% endblock %}
