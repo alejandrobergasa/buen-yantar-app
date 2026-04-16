@@ -1295,12 +1295,27 @@ body.route-inventario .detail-history-box {
   font-variant-numeric: tabular-nums;
 }
 
+.purchase-total-passive {
+  min-height: 1.9rem;
+  padding: 0.24rem 0.45rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border: 1px solid #d2ddd7;
+  border-radius: 0.75rem;
+  background: #f3f6f4;
+  color: #4f6258;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .purchase-col-qty .input,
 .purchase-col-unit .input,
 .purchase-col-total .input,
 .purchase-col-current .input,
 .purchase-col-recommended .purchase-price-hint,
-.purchase-col-unit .purchase-price-passive {
+.purchase-col-unit .purchase-price-passive,
+.purchase-col-total .purchase-total-passive {
   width: min(100%, 6.4rem);
   margin-left: auto;
 }

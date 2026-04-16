@@ -131,6 +131,7 @@
 
   function syncLinePricing(row) {
     const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+    const subtotalPassive = row.querySelector(".purchase-total-passive");
     const pricing = getPurchasePricing({
       qty: row.querySelector('input[name="cantidad[]"]').value,
       unitPrice: row.querySelector('input[name="precio_compra[]"]').value,
@@ -140,6 +141,9 @@
     });
     if (row.dataset.fractional !== "1") {
       subtotalInput.value = pricing.lineTotal !== null ? pricing.lineTotal.toFixed(2) : "";
+      if (subtotalPassive) {
+        subtotalPassive.textContent = pricing.lineTotal !== null ? formatMoney(pricing.lineTotal) : "-";
+      }
     }
     updateSaleRecommendation(row);
     refreshSummary();
@@ -150,12 +154,19 @@
     const unitPriceInput = row.querySelector('input[name="precio_compra[]"]');
     const unitPricePassive = row.querySelector(".purchase-price-passive");
     const subtotalInput = row.querySelector('input[name="subtotal_compra[]"]');
+    const subtotalPassive = row.querySelector(".purchase-total-passive");
 
     unitPriceInput.hidden = isFractional;
     unitPricePassive.hidden = !isFractional;
     unitPricePassive.setAttribute("aria-hidden", isFractional ? "false" : "true");
     unitPricePassive.textContent = isFractional ? "Calculado" : "-";
 
+    subtotalInput.hidden = !isFractional;
+    if (subtotalPassive) {
+      subtotalPassive.hidden = isFractional;
+      subtotalPassive.setAttribute("aria-hidden", isFractional ? "true" : "false");
+      subtotalPassive.textContent = "-";
+    }
     subtotalInput.readOnly = !isFractional;
     subtotalInput.classList.toggle("input-readonly", !isFractional);
     subtotalInput.placeholder = isFractional ? "0.00" : "Auto";

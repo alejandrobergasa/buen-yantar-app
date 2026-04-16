@@ -589,6 +589,7 @@ def create_app() -> Flask:
 
     def analysis_detail_type_options() -> list[dict[str, str]]:
         return [
+            {"value": "ancla", "label": "Ancla"},
             {"value": "factura", "label": "Factura"},
             {"value": "compra", "label": "Compra"},
             {"value": "gasto", "label": "Gasto"},
@@ -1831,7 +1832,7 @@ def create_app() -> Flask:
             title="Migracion legacy",
             config_section="migracion",
             config_title="Migracion desde archivos legacy",
-            config_subtitle="Sustituye usuarios, inventario, facturas, movimientos y saldo de caja por los datos de la version antigua.",
+            config_subtitle="Sustituye usuarios, inventario y facturas por la version antigua, y fija la caja con saldo inicial anual y saldo actual.",
             config_nav=config_shortcuts("migracion"),
         )
 
@@ -1842,7 +1843,8 @@ def create_app() -> Flask:
             return r
 
         folder_raw = (request.form.get("legacy_folder") or "").strip()
-        cash_raw = (request.form.get("saldo_caja_final") or "").strip()
+        cash_raw = (request.form.get("saldo_caja_actual") or request.form.get("saldo_caja_final") or "").strip()
+        year_start_cash_raw = (request.form.get("saldo_caja_inicio_anio") or "").strip()
         if not folder_raw:
             flash("Debes indicar la carpeta que contiene los archivos legacy.")
             return redirect_to_config("migracion")
@@ -1854,13 +1856,20 @@ def create_app() -> Flask:
         try:
             final_cash = round(parse_decimal(cash_raw), 2)
         except ValueError:
-            flash("El saldo final de caja no es válido.")
+            flash("El saldo actual de caja no es válido.")
+            return redirect_to_config("migracion")
+
+        try:
+            year_start_cash = round(parse_decimal(year_start_cash_raw), 2)
+        except ValueError:
+            flash("El saldo al inicio del año no es válido.")
             return redirect_to_config("migracion")
 
         try:
             result = migrate_legacy_dataset(
                 legacy_folder=legacy_folder,
                 saldo_final_caja=final_cash,
+                saldo_inicio_anio=year_start_cash,
                 csv_usuarios=config.CSV_USUARIOS,
                 csv_productos=config.CSV_PRODUCTOS,
                 csv_grupos=config.CSV_GRUPOS,
@@ -1882,7 +1891,7 @@ def create_app() -> Flask:
                     f"Carpeta={legacy_folder} | usuarios={result.users} | productos={result.products} | "
                     f"grupos={result.groups} | facturas={result.invoices} | lineas={result.invoice_lines} | "
                     f"ajustes_stock={result.stock_adjustments} | placeholders={result.placeholders} | "
-                    f"saldo_final={final_cash:.2f}"
+                    f"saldo_inicio_anio={year_start_cash:.2f} | saldo_actual={final_cash:.2f}"
                 ),
             )
         except Exception as exc:

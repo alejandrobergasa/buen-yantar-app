@@ -23,6 +23,7 @@ USERS_FILENAME = "buenyantarusuarios.txt"
 INVENTORY_FILENAME = "buenyantarinventario.txt"
 INVOICES_FILENAME = "buenyantarfacturas.txt"
 LEGACY_INFINITY_THRESHOLD = 9999
+LEGACY_INVOICE_PREFIX = "LG"
 
 
 @dataclass
@@ -85,6 +86,7 @@ def migrate_legacy_dataset(
     *,
     legacy_folder: Path,
     saldo_final_caja: float,
+    saldo_inicio_anio: float,
     csv_usuarios: Path,
     csv_productos: Path,
     csv_grupos: Path,
@@ -98,6 +100,9 @@ def migrate_legacy_dataset(
     imported_by: str = "",
 ) -> LegacyMigrationResult:
     users_path, inventory_path, invoices_path = _ensure_legacy_files(legacy_folder)
+    migration_dt = datetime.now().replace(microsecond=0)
+    migration_ts = migration_dt.strftime("%Y-%m-%d %H:%M:%S")
+    migration_user = (imported_by or "").strip() or "system"
 
     legacy_inventory = _read_legacy_lines(inventory_path)
     product_rows: List[Dict[str, str]] = []
@@ -214,7 +219,7 @@ def migrate_legacy_dataset(
         if len(item_parts) % 3 != 0:
             raise ValueError(f"Factura legacy con estructura inválida en fecha {legacy_date}: {line}")
 
-        factura_id = prefixed_id("FV")
+        factura_id = prefixed_id(LEGACY_INVOICE_PREFIX)
         invoice_ts = _invoice_iso_date(legacy_date)
         total_amount = 0.0
         actual_lines = 0
@@ -289,10 +294,25 @@ def migrate_legacy_dataset(
 
     cash_row = {
         "saldo_actual": _format_amount(round(float(saldo_final_caja), 2)),
-        "actualizado_en": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "actualizado_por": (imported_by or "").strip(),
-        "nota": f"Migracion legacy desde {legacy_folder}",
+        "actualizado_en": migration_ts,
+        "actualizado_por": migration_user,
+        "nota": (
+            f"Migracion legacy desde {legacy_folder} | "
+            f"saldo_inicio_anio={_format_amount(round(float(saldo_inicio_anio), 2))}"
+        ),
     }
+    log_rows = [{
+        "log_id": short_id(),
+        "fecha": migration_ts,
+        "usuario": migration_user,
+        "accion": "MIGRACION CAJA",
+        "detalle": (
+            f"corte={migration_ts} | "
+            f"saldo_inicio_anio={_format_amount(round(float(saldo_inicio_anio), 2))} | "
+            f"saldo_actual={_format_amount(round(float(saldo_final_caja), 2))} | "
+            f"carpeta={legacy_folder}"
+        ),
+    }]
 
     ensure_csv(csv_usuarios, USERS_HEADERS)
     ensure_csv(csv_productos, PRODUCT_HEADERS)
@@ -309,7 +329,7 @@ def migrate_legacy_dataset(
     write_all_atomic(csv_facturas, invoice_rows, INVOICE_HEADERS, backup_dir=backup_dir)
     write_all_atomic(csv_factura_lineas, invoice_line_rows, INVOICE_LINE_HEADERS, backup_dir=backup_dir)
     write_all_atomic(csv_caja, [cash_row], CASHBOX_HEADERS, backup_dir=backup_dir)
-    write_all_atomic(csv_logs, [], AUDIT_HEADERS, backup_dir=backup_dir)
+    write_all_atomic(csv_logs, log_rows, AUDIT_HEADERS, backup_dir=backup_dir)
     write_all_atomic(csv_gastos, [], FREE_EXPENSE_HEADERS, backup_dir=backup_dir)
 
     return LegacyMigrationResult(

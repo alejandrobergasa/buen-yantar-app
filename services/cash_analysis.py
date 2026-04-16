@@ -7,6 +7,7 @@ import re
 from typing import Dict, List
 
 from .csv_store import read_all, write_all_atomic
+from .legacy_migration import LEGACY_INVOICE_PREFIX
 
 
 CASH_MOVEMENT_HEADERS = [
@@ -34,11 +35,13 @@ _ADJUSTMENT_RE = re.compile(
 )
 
 _TYPE_PRIORITY = {
+    "ancla": 0,
     "factura": 1,
     "compra": 2,
     "gasto": 3,
     "ajuste": 4,
 }
+_MIGRATION_CASH_ACTION = "MIGRACION CAJA"
 
 
 def _now_iso() -> str:
@@ -113,6 +116,7 @@ def _current_cash_balance(cashbox_csv: Path) -> float:
 
 def _invoice_movements(invoices_csv: Path) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
+    legacy_prefix = f"{LEGACY_INVOICE_PREFIX}-"
     for invoice in read_all(invoices_csv):
         amount = round(_to_float(invoice.get("total_importe", "0")), 2)
         if abs(amount) < 1e-9:
@@ -127,6 +131,7 @@ def _invoice_movements(invoices_csv: Path) -> List[Dict[str, object]]:
             "ref_id": ref_id,
             "usuario": (invoice.get("usuario") or "").strip(),
             "origen": "facturas",
+            "is_legacy": ref_id.upper().startswith(legacy_prefix),
         })
     return rows
 
@@ -230,6 +235,67 @@ def _adjustment_movements(logs_csv: Path) -> List[Dict[str, object]]:
     return rows
 
 
+def _migration_cash_config(logs_csv: Path) -> Dict[str, object] | None:
+    latest: Dict[str, object] | None = None
+    for log in read_all(logs_csv):
+        if (log.get("accion") or "").strip().upper() != _MIGRATION_CASH_ACTION:
+            continue
+
+        detail = (log.get("detalle") or "").strip()
+        cutoff_raw = _extract_note_value(detail, "corte=") or (log.get("fecha") or "").strip()
+        cutoff_dt = _parse_datetime(cutoff_raw) or _parse_datetime(log.get("fecha", ""))
+        if not cutoff_dt:
+            continue
+
+        payload = {
+            "cutoff": cutoff_dt,
+            "saldo_inicio_anio": round(_to_float(_extract_note_value(detail, "saldo_inicio_anio=")), 2),
+            "saldo_actual": round(_to_float(_extract_note_value(detail, "saldo_actual=")), 2),
+            "usuario": (log.get("usuario") or "").strip(),
+        }
+        if latest is None or cutoff_dt > latest["cutoff"]:
+            latest = payload
+    return latest
+
+
+def _migration_anchor_movements(migration_cash: Dict[str, object]) -> List[Dict[str, object]]:
+    cutoff_dt = migration_cash["cutoff"]
+    year_start = datetime(cutoff_dt.year, 1, 1, 0, 0, 0)
+    user = str(migration_cash.get("usuario") or "").strip()
+    year_start_balance = round(float(migration_cash.get("saldo_inicio_anio") or 0.0), 2)
+    current_balance = round(float(migration_cash.get("saldo_actual") or 0.0), 2)
+
+    return [
+        {
+            "movimiento_id": f"ANCLA-{cutoff_dt.year}-INICIO",
+            "fecha": year_start.strftime("%Y-%m-%d %H:%M:%S"),
+            "tipo": "ancla",
+            "descripcion": "Saldo inicial anual fijado en la migracion",
+            "importe_valor": 0.0,
+            "saldo_fijo": year_start_balance,
+            "ref_id": "",
+            "usuario": user,
+            "origen": "migracion",
+        },
+        {
+            "movimiento_id": f"ANCLA-{cutoff_dt.strftime('%Y%m%d%H%M%S')}-CORTE",
+            "fecha": cutoff_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "tipo": "ancla",
+            "descripcion": "Saldo real de caja al migrar",
+            "importe_valor": 0.0,
+            "saldo_fijo": current_balance,
+            "ref_id": "",
+            "usuario": user,
+            "origen": "migracion",
+        },
+    ]
+
+
+def _is_before_migration_cutoff(row: Dict[str, object], cutoff_day: date) -> bool:
+    parsed = _parse_datetime(str(row.get("fecha") or ""))
+    return bool(parsed and parsed.date() < cutoff_day)
+
+
 def _daily_history_rows(movements: List[Dict[str, str]], opening_balance: float) -> List[Dict[str, str]]:
     today = date.today()
     updated_at = _now_iso()
@@ -282,12 +348,30 @@ def rebuild_cash_analysis_files(
     cash_daily_csv: Path,
     backup_dir: Path | None = None,
 ) -> dict[str, object]:
+    migration_cash = _migration_cash_config(logs_csv)
+    cutoff_day = migration_cash["cutoff"].date() if migration_cash else None
+    invoice_rows = _invoice_movements(invoices_csv)
+    if migration_cash:
+        invoice_rows = [
+            row for row in invoice_rows
+            if not bool(row.get("is_legacy")) and not _is_before_migration_cutoff(row, cutoff_day)
+        ]
+    purchase_rows = _purchase_movements(inventory_movs_csv)
+    expense_rows = _expense_movements(expenses_csv)
+    adjustment_rows = _adjustment_movements(logs_csv)
+    if migration_cash:
+        purchase_rows = [row for row in purchase_rows if not _is_before_migration_cutoff(row, cutoff_day)]
+        expense_rows = [row for row in expense_rows if not _is_before_migration_cutoff(row, cutoff_day)]
+        adjustment_rows = [row for row in adjustment_rows if not _is_before_migration_cutoff(row, cutoff_day)]
+
     raw_rows = (
-        _invoice_movements(invoices_csv)
-        + _purchase_movements(inventory_movs_csv)
-        + _expense_movements(expenses_csv)
-        + _adjustment_movements(logs_csv)
+        invoice_rows
+        + purchase_rows
+        + expense_rows
+        + adjustment_rows
     )
+    if migration_cash:
+        raw_rows.extend(_migration_anchor_movements(migration_cash))
     raw_rows.sort(key=lambda row: _sort_key({
         "fecha": str(row.get("fecha") or ""),
         "tipo": str(row.get("tipo") or ""),
@@ -296,14 +380,22 @@ def rebuild_cash_analysis_files(
     }))
 
     current_balance = _current_cash_balance(cashbox_csv)
-    total_delta = round(sum(float(row.get("importe_valor") or 0.0) for row in raw_rows), 2)
-    opening_balance = round(current_balance - total_delta, 2)
+    anchor_rows = [row for row in raw_rows if row.get("saldo_fijo") is not None]
+    if anchor_rows:
+        opening_balance = round(float(anchor_rows[0].get("saldo_fijo") or 0.0), 2)
+    else:
+        total_delta = round(sum(float(row.get("importe_valor") or 0.0) for row in raw_rows), 2)
+        opening_balance = round(current_balance - total_delta, 2)
 
     movements: List[Dict[str, str]] = []
     running_balance = opening_balance
     for row in raw_rows:
-        amount = round(float(row.get("importe_valor") or 0.0), 2)
-        running_balance = round(running_balance + amount, 2)
+        if row.get("saldo_fijo") is not None:
+            amount = 0.0
+            running_balance = round(float(row.get("saldo_fijo") or 0.0), 2)
+        else:
+            amount = round(float(row.get("importe_valor") or 0.0), 2)
+            running_balance = round(running_balance + amount, 2)
         movements.append({
             "movimiento_id": str(row.get("movimiento_id") or "").strip(),
             "fecha": str(row.get("fecha") or "").strip(),
@@ -324,6 +416,7 @@ def rebuild_cash_analysis_files(
     return {
         "opening_balance": opening_balance,
         "current_balance": current_balance,
+        "generated_current_balance": round(_to_float(movements[-1].get("saldo", "0")) if movements else opening_balance, 2),
         "movements": len(movements),
         "days": len(daily_rows),
     }
@@ -457,18 +550,17 @@ def cash_annual_summary(
             sum(abs(_to_float(row.get("importe", "0"))) for row in current_rows if _to_float(row.get("importe", "0")) < 0),
             2,
         )
-        month_balance = 0.0
         if current_rows:
             running_balance = round(_to_float(current_rows[-1].get("saldo", "0")), 2)
             closing_balance = running_balance
-            month_balance = running_balance
+        display_balance = running_balance if current_month <= date(data_end_date.year, data_end_date.month, 1) else 0.0
 
         month_rows.append({
             "year": current_month.year,
             "month": current_month.month,
             "income_total": income_total,
             "expense_total": expense_total,
-            "saldo": month_balance,
+            "saldo": display_balance,
         })
 
         if current_month.month == 12:

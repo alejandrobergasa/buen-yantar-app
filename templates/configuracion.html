@@ -419,12 +419,16 @@
 
     <form method="post" action="{{ url_for('ejecutar_migracion_legacy') }}" class="form" onsubmit="return confirm('¿Seguro que quieres reemplazar toda la base de datos actual por la legacy?')">
       <div>
-        <label class="label">Carpeta de archivos legacy</label>
+        <label class="label">Ruta del directorio de ficheros originales</label>
         <input class="input" name="legacy_folder" placeholder="Ej: old_files_example o C:\datos\legacy" required>
       </div>
       <div>
-        <label class="label">Saldo final de caja</label>
-        <input class="input" name="saldo_caja_final" placeholder="Ej: 1234,56" required>
+        <label class="label">Saldo actual</label>
+        <input class="input" name="saldo_caja_actual" placeholder="Ej: 1234,56" required>
+      </div>
+      <div>
+        <label class="label">Saldo al inicio del año</label>
+        <input class="input" name="saldo_caja_inicio_anio" placeholder="Ej: 850,00" required>
       </div>
       <div class="actions">
         <button class="btn btn-primary" type="submit">Ejecutar migración</button>
@@ -440,7 +444,10 @@
         </div>
       </div>
       <div class="help">
-        Importa los tres ficheros antiguos, conserva el histórico de facturas, reconstruye el stock inicial necesario para cuadrar existencias y deja la caja con el saldo final que indiques.
+        Importa los tres ficheros antiguos, conserva el histórico de facturas, reconstruye el stock inicial necesario para cuadrar existencias y fija dos anclas de caja: saldo al inicio del año y saldo real al migrar.
+      </div>
+      <div class="help">
+        Las facturas legacy se conservan como histórico, pero no se usan para recalcular la caja hacia atrás. Desde la migración en adelante, la caja vuelve a actualizarse con normalidad.
       </div>
       <div class="help">
         Los grupos numéricos antiguos se crean como “Grupo 1”, “Grupo 2”, etc., para que luego puedas reasignarlos y eliminarlos desde la sección de grupos.
