@@ -41,6 +41,7 @@
           <th>Descripcion</th>
           <th>Usuario</th>
           <th class="right">Importe</th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -57,6 +58,15 @@
           <td>{{ row.descripcion }}</td>
           <td>{{ row.usuario or "-" }}</td>
           <td class="right">{{ row.importe }} €</td>
+          <td>
+            <form method="post" action="{{ url_for('eliminar_gasto_libre', expense_id=row.gasto_id) }}" data-delete-entry-form data-entry-label="el gasto {{ row.gasto_id }}">
+              <input type="hidden" name="q" value="{{ current_q }}">
+              <input type="hidden" name="from" value="{{ current_from }}">
+              <input type="hidden" name="to" value="{{ current_to }}">
+              <input type="hidden" name="update_cash" value="0" data-update-cash-input>
+              <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -94,6 +104,20 @@
       window.setTimeout(() => {
         button.textContent = original;
       }, 1400);
+    });
+  });
+
+  document.querySelectorAll("[data-delete-entry-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      const label = form.dataset.entryLabel || "este registro";
+      if (!window.confirm(`¿Seguro que quieres eliminar ${label}?`)) {
+        event.preventDefault();
+        return;
+      }
+      const updateCashInput = form.querySelector("[data-update-cash-input]");
+      if (updateCashInput) {
+        updateCashInput.value = window.confirm("¿Quieres actualizar también el saldo de caja en consecuencia?") ? "1" : "0";
+      }
     });
   });
 </script>

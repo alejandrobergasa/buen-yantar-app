@@ -1,4 +1,5 @@
 :root {
+  --app-zoom-scale: 1;
   --bg-1: #f4f8f5;
   --bg-2: #e6f0eb;
   --surface: #ffffff;
@@ -40,6 +41,18 @@ body {
   font-family: "Nunito", "Segoe UI Variable", "Trebuchet MS", "Tahoma", sans-serif;
   line-height: 1.45;
   background: linear-gradient(165deg, var(--bg-1), var(--bg-2));
+  overflow-x: hidden;
+}
+
+.app-zoom-shell {
+  min-height: 100vh;
+}
+
+body.app-zoom-fallback .app-zoom-shell {
+  width: calc(100% / var(--app-zoom-scale));
+  min-height: calc(100vh / var(--app-zoom-scale));
+  transform: scale(var(--app-zoom-scale));
+  transform-origin: top left;
 }
 
 .skip-link {
@@ -2700,6 +2713,15 @@ body {
   gap: 0.7rem;
 }
 
+.home-side-panels-single {
+  align-content: start;
+  grid-template-rows: auto auto;
+}
+
+.home-side-panel-stock {
+  min-height: 18.5rem;
+}
+
 .home-mini-stats {
   display: grid;
   gap: 0.38rem;
@@ -4187,6 +4209,10 @@ body.route-analisis {
     grid-template-rows: auto minmax(18.5rem, 1.4fr) minmax(13rem, 0.84fr);
   }
 
+  .home-side-panels-single {
+    grid-template-rows: auto auto;
+  }
+
   .shopping-dialog-list {
     max-height: 18rem;
   }
@@ -4389,6 +4415,10 @@ body.route-analisis {
 .home-side-panels {
   grid-template-rows: auto minmax(0, 1.4fr) minmax(0, 0.84fr);
   gap: 0.55rem;
+}
+
+.home-side-panels-single {
+  grid-template-rows: auto auto;
 }
 
 .home-compact-item-activity {
@@ -4629,14 +4659,15 @@ body.route-analisis {
 }
 
 body.route-analisis {
-  overflow: auto;
+  overflow: hidden;
 }
 
 .route-analisis .container.page-stack {
-  display: grid;
-  gap: 1rem;
-  min-height: auto;
-  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: hidden;
   padding: 1rem;
 }
 
@@ -4787,6 +4818,31 @@ body.route-analisis {
 
 .analysis-detail-scroll {
   max-height: 65vh;
+}
+
+.analysis-page-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.route-analisis .table-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.route-analisis .table-card > .inv-scrollbox {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.route-analisis .analysis-detail-scroll {
+  max-height: none;
+  height: 100%;
 }
 
 .analysis-type-checklist {
@@ -5055,6 +5111,10 @@ body.route-analisis {
     grid-template-rows: auto minmax(0, 1.18fr) minmax(0, 0.8fr);
   }
 
+  .route-home .home-side-panels-single {
+    grid-template-rows: auto auto;
+  }
+
   .route-inventario .inv-grid {
     grid-template-columns: minmax(19rem, 0.94fr) minmax(0, 1.34fr);
   }
@@ -5161,6 +5221,10 @@ body.route-analisis {
 
   .route-home .home-side-panels {
     grid-template-rows: auto minmax(0, 1.12fr) minmax(0, 0.72fr);
+  }
+
+  .route-home .home-side-panels-single {
+    grid-template-rows: auto auto;
   }
 
   .table-card {

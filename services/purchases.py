@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .csv_store import read_all
+from .csv_store import read_all, write_all_atomic
+from .inventory import MOV_HEADERS
 _PURCHASE_HISTORY_CACHE: Dict[tuple[str, int, int], Dict[str, object]] = {}
 
 
@@ -126,3 +127,52 @@ def list_purchase_history(
     }
 
     return tickets, lines_map
+
+
+def delete_purchase(
+    movs_csv: Path,
+    ref_id: str,
+    *,
+    backup_dir: Path | None = None,
+) -> Dict[str, object] | None:
+    target = (ref_id or "").strip()
+    if not target:
+        return None
+
+    rows = read_all(movs_csv)
+    removed_rows = [
+        row for row in rows
+        if (row.get("origen") or "").strip().upper() == "COMPRA"
+        and (row.get("ref_id") or "").strip() == target
+    ]
+    if not removed_rows:
+        return None
+
+    removed_rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    first = removed_rows[0]
+    total = 0.0
+    units = 0.0
+    for row in removed_rows:
+        qty = _to_float(row.get("cantidad", "0"))
+        units += qty
+        unit_price = _extract_from_note(row.get("nota", ""), "€/u:")
+        total += qty * (_to_float(unit_price) if unit_price else 0.0)
+
+    remaining_rows = [
+        row for row in rows
+        if not (
+            (row.get("origen") or "").strip().upper() == "COMPRA"
+            and (row.get("ref_id") or "").strip() == target
+        )
+    ]
+    write_all_atomic(movs_csv, remaining_rows, MOV_HEADERS, backup_dir=backup_dir)
+
+    return {
+        "ref_id": target,
+        "fecha": first.get("fecha", ""),
+        "usuario": _extract_from_note(first.get("nota", ""), "Usr:"),
+        "proveedor": _extract_from_note(first.get("nota", ""), "Prov:"),
+        "lineas": len(removed_rows),
+        "unidades": units,
+        "total_importe": round(total, 2),
+    }

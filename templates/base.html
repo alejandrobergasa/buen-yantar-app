@@ -7,8 +7,9 @@
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}{% if low_resource_mode %} performance-low{% endif %}">
+<body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}{% if low_resource_mode %} performance-low{% endif %}" data-app-zoom="{{ app_zoom_scale }}">
   <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
+  <div class="app-zoom-shell">
   <div class="page-glow page-glow-a" aria-hidden="true"></div>
   <div class="page-glow page-glow-b" aria-hidden="true"></div>
   <header class="topbar">
@@ -38,8 +39,23 @@
     {% include "_flash.html" %}
     {% block content %}{% endblock %}
   </main>
+  </div>
 
   <script>
+    (() => {
+      const rawScale = document.body.dataset.appZoom || "1";
+      const scale = Number(rawScale);
+      if (!Number.isFinite(scale) || Math.abs(scale - 1) < 0.001) return;
+
+      const supportsZoom = typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("zoom", "1.1");
+      if (supportsZoom) {
+        document.documentElement.style.zoom = String(scale);
+      } else {
+        document.documentElement.style.setProperty("--app-zoom-scale", String(scale));
+        document.body.classList.add("app-zoom-fallback");
+      }
+    })();
+
     document.querySelectorAll("[data-flash-close]").forEach((button) => {
       button.addEventListener("click", () => {
         const item = button.closest(".flash-item");

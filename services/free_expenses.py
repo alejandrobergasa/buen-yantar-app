@@ -5,7 +5,7 @@ from heapq import nlargest
 from pathlib import Path
 from typing import Dict, List
 
-from .csv_store import append_rows, read_all
+from .csv_store import append_rows, read_all, write_all_atomic
 from .ids import prefixed_id
 
 FREE_EXPENSE_HEADERS = [
@@ -80,3 +80,29 @@ def list_free_expenses(expenses_csv: Path, limit: int = 400) -> List[Dict[str, s
         rows.sort(key=lambda x: x.get("fecha", ""), reverse=True)
         return rows
     return nlargest(limit, rows, key=lambda x: x.get("fecha", ""))
+
+
+def delete_free_expense(
+    expenses_csv: Path,
+    expense_id: str,
+    *,
+    backup_dir: Path | None = None,
+) -> Dict[str, str] | None:
+    target = (expense_id or "").strip()
+    if not target:
+        return None
+
+    rows = read_all(expenses_csv)
+    expense = next(
+        (row for row in rows if (row.get("gasto_id") or "").strip() == target),
+        None,
+    )
+    if expense is None:
+        return None
+
+    remaining_rows = [
+        row for row in rows
+        if (row.get("gasto_id") or "").strip() != target
+    ]
+    write_all_atomic(expenses_csv, remaining_rows, FREE_EXPENSE_HEADERS, backup_dir=backup_dir)
+    return expense

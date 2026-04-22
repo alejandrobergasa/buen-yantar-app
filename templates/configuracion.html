@@ -455,5 +455,61 @@
     </section>
   </aside>
 </div>
+{% elif config_section == "pantalla" %}
+<div class="settings-grid">
+  <section class="panel">
+    <div class="section-head compact-head">
+      <div>
+        <h2 class="section-heading">Zoom de apertura</h2>
+        <div class="activity-meta">Se aplicará automáticamente al abrir la app.</div>
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('actualizar_zoom_app') }}" class="form">
+      <div class="grid-2">
+        <div>
+          <label class="label">Zoom</label>
+          <select class="input" name="app_zoom_percent">
+            {% for option in app_zoom_options %}
+            <option value="{{ option }}" {% if option == app_zoom_percent %}selected{% endif %}>{{ option }}%</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label">Valor actual</label>
+          <input class="input" value="{{ app_zoom_percent }}%" readonly>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Guardar zoom</button>
+      </div>
+    </form>
+  </section>
+
+  <aside class="settings-side">
+    <section class="panel">
+      <div class="section-head compact-head">
+        <div>
+          <h2 class="section-heading">Referencia</h2>
+        </div>
+      </div>
+
+      <div class="home-mini-stats">
+        <div class="home-mini-stat">
+          <span>Zoom configurado</span>
+          <strong>{{ app_zoom_percent }}%</strong>
+        </div>
+        <div class="home-mini-stat">
+          <span>Aplicación</span>
+          <strong>Al abrir la app</strong>
+        </div>
+      </div>
+
+      <div class="help">
+        Este ajuste solo cambia el zoom interno de Buen Yantar. No modifica el zoom global del navegador.
+      </div>
+    </section>
+  </aside>
+</div>
 {% endif %}
 {% endblock %}

@@ -19,6 +19,7 @@ CSV_CAJA = DATA_DIR / "caja.csv"
 CSV_CAJA_MOVIMIENTOS = DATA_DIR / "caja_movimientos.csv"
 CSV_CAJA_HISTORIAL = DATA_DIR / "caja_historial_diario.csv"
 CSV_GASTOS_LIBRES = DATA_DIR / "gastos_libres.csv"
+CSV_APP_SETTINGS = DATA_DIR / "app_settings.csv"
 PRINT_JOBS_DIR = DATA_DIR / "print_jobs"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-cambia-esto")

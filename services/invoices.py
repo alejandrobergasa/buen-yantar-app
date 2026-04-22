@@ -5,7 +5,7 @@ from heapq import nlargest
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
-from .csv_store import read_all, append_rows
+from .csv_store import read_all, append_rows, write_all_atomic
 from .ids import prefixed_id, short_id
 from .inventory import MOV_HEADERS, now_iso
 
@@ -201,3 +201,61 @@ def list_invoice_lines_for(facturas_lineas_csv: Path, factura_id: str) -> List[D
         return []
 
     return list_invoice_lines_for_ids(facturas_lineas_csv, [target]).get(target, [])
+
+
+def delete_invoice(
+    facturas_csv: Path,
+    facturas_lineas_csv: Path,
+    movs_csv: Path,
+    factura_id: str,
+    *,
+    backup_dir: Path | None = None,
+) -> Dict[str, object] | None:
+    target = (factura_id or "").strip()
+    if not target:
+        return None
+
+    invoices = read_all(facturas_csv)
+    invoice = next(
+        (row for row in invoices if (row.get("factura_id") or "").strip() == target),
+        None,
+    )
+    if invoice is None:
+        return None
+
+    remaining_invoices = [
+        row for row in invoices
+        if (row.get("factura_id") or "").strip() != target
+    ]
+    invoice_lines = read_all(facturas_lineas_csv)
+    removed_lines = [
+        row for row in invoice_lines
+        if (row.get("factura_id") or "").strip() == target
+    ]
+    remaining_lines = [
+        row for row in invoice_lines
+        if (row.get("factura_id") or "").strip() != target
+    ]
+    mov_rows = read_all(movs_csv)
+    removed_movs = [
+        row for row in mov_rows
+        if (row.get("origen") or "").strip().upper() == "FACTURA"
+        and (row.get("ref_id") or "").strip() == target
+    ]
+    remaining_movs = [
+        row for row in mov_rows
+        if not (
+            (row.get("origen") or "").strip().upper() == "FACTURA"
+            and (row.get("ref_id") or "").strip() == target
+        )
+    ]
+
+    write_all_atomic(facturas_csv, remaining_invoices, INVOICE_HEADERS, backup_dir=backup_dir)
+    write_all_atomic(facturas_lineas_csv, remaining_lines, INVOICE_LINE_HEADERS, backup_dir=backup_dir)
+    write_all_atomic(movs_csv, remaining_movs, MOV_HEADERS, backup_dir=backup_dir)
+
+    return {
+        "invoice": invoice,
+        "removed_line_count": len(removed_lines),
+        "removed_movement_count": len(removed_movs),
+    }

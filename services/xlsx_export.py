@@ -25,30 +25,19 @@ def _number_cell(ref: str, value: float, style: int) -> str:
     return f'<c r="{ref}" s="{style}"><v>{value:.2f}</v></c>'
 
 
-def build_cash_detail_workbook(rows: list[dict[str, object]]) -> bytes:
-    headers = ["fecha", "tipo", "descripcion", "importe", "saldo"]
-    sheet_rows: list[str] = []
-
-    header_cells = [
-        _inline_string_cell(f"{_column_name(index)}1", header, style=1)
-        for index, header in enumerate(headers, start=1)
-    ]
-    sheet_rows.append(f"<row r=\"1\">{''.join(header_cells)}</row>")
-
-    for row_index, row in enumerate(rows, start=2):
-        amount = float(row.get("importe_valor", row.get("importe", 0)) or 0)
-        balance = float(row.get("saldo_valor", row.get("saldo", 0)) or 0)
-        amount_style = 2 if amount > 0 else 3 if amount < 0 else 4
-        cells = [
-            _inline_string_cell(f"A{row_index}", str(row.get("fecha_label", row.get("fecha", "")))),
-            _inline_string_cell(f"B{row_index}", str(row.get("tipo", ""))),
-            _inline_string_cell(f"C{row_index}", str(row.get("descripcion", ""))),
-            _number_cell(f"D{row_index}", amount, amount_style),
-            _number_cell(f"E{row_index}", balance, 5),
-        ]
-        sheet_rows.append(f"<row r=\"{row_index}\">{''.join(cells)}</row>")
-
-    row_count = max(len(rows) + 1, 1)
+def _build_workbook(
+    *,
+    sheet_rows: list[str],
+    header_count: int,
+    column_widths: list[int],
+    sheet_name: str,
+) -> bytes:
+    row_count = max(len(sheet_rows), 1)
+    cols_xml = "".join(
+        f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
+        for index, width in enumerate(column_widths, start=1)
+    )
+    auto_filter_ref = f"A1:{_column_name(header_count)}{row_count}"
     worksheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetViews>
@@ -57,16 +46,12 @@ def build_cash_detail_workbook(rows: list[dict[str, object]]) -> bytes:
     </sheetView>
   </sheetViews>
   <cols>
-    <col min="1" max="1" width="14" customWidth="1"/>
-    <col min="2" max="2" width="16" customWidth="1"/>
-    <col min="3" max="3" width="44" customWidth="1"/>
-    <col min="4" max="4" width="14" customWidth="1"/>
-    <col min="5" max="5" width="14" customWidth="1"/>
+    {cols_xml}
   </cols>
   <sheetData>
     {''.join(sheet_rows)}
   </sheetData>
-  <autoFilter ref="A1:E{row_count}"/>
+  <autoFilter ref="{auto_filter_ref}"/>
 </worksheet>
 """
 
@@ -156,11 +141,11 @@ def build_cash_detail_workbook(rows: list[dict[str, object]]) -> bytes:
 </styleSheet>
 """
 
-    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    workbook_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="Tabla detalle" sheetId="1" r:id="rId1"/>
+    <sheet name="{escape(sheet_name)}" sheetId="1" r:id="rId1"/>
   </sheets>
 </workbook>
 """
@@ -221,3 +206,92 @@ def build_cash_detail_workbook(rows: list[dict[str, object]]) -> bytes:
         archive.writestr("xl/styles.xml", styles_xml)
         archive.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
     return buffer.getvalue()
+
+
+def build_cash_detail_workbook(rows: list[dict[str, object]]) -> bytes:
+    headers = ["fecha", "tipo", "descripcion", "importe", "saldo"]
+    sheet_rows: list[str] = []
+
+    header_cells = [
+        _inline_string_cell(f"{_column_name(index)}1", header, style=1)
+        for index, header in enumerate(headers, start=1)
+    ]
+    sheet_rows.append(f"<row r=\"1\">{''.join(header_cells)}</row>")
+
+    for row_index, row in enumerate(rows, start=2):
+        amount = float(row.get("importe_valor", row.get("importe", 0)) or 0)
+        balance = float(row.get("saldo_valor", row.get("saldo", 0)) or 0)
+        amount_style = 2 if amount > 0 else 3 if amount < 0 else 4
+        cells = [
+            _inline_string_cell(f"A{row_index}", str(row.get("fecha_label", row.get("fecha", "")))),
+            _inline_string_cell(f"B{row_index}", str(row.get("tipo", ""))),
+            _inline_string_cell(f"C{row_index}", str(row.get("descripcion", ""))),
+            _number_cell(f"D{row_index}", amount, amount_style),
+            _number_cell(f"E{row_index}", balance, 5),
+        ]
+        sheet_rows.append(f"<row r=\"{row_index}\">{''.join(cells)}</row>")
+
+    return _build_workbook(
+        sheet_rows=sheet_rows,
+        header_count=len(headers),
+        column_widths=[14, 16, 44, 14, 14],
+        sheet_name="Tabla detalle",
+    )
+
+
+def build_cash_annual_workbook(
+    rows: list[dict[str, object]],
+    *,
+    selected_year: int,
+    opening_balance: float,
+    closing_balance: float,
+    net_balance: float,
+) -> bytes:
+    headers = ["mes", "total_ingresos", "total_gastos", "saldo"]
+    sheet_rows: list[str] = []
+
+    header_cells = [
+        _inline_string_cell(f"{_column_name(index)}1", header, style=1)
+        for index, header in enumerate(headers, start=1)
+    ]
+    sheet_rows.append(f"<row r=\"1\">{''.join(header_cells)}</row>")
+
+    for row_index, row in enumerate(rows, start=2):
+        income_total = float(row.get("income_total", 0) or 0)
+        expense_total = float(row.get("expense_total", 0) or 0)
+        balance = float(row.get("saldo", 0) or 0)
+        balance_style = 2 if balance > 0 else 3 if balance < 0 else 4
+        cells = [
+            _inline_string_cell(f"A{row_index}", str(row.get("label", ""))),
+            _number_cell(f"B{row_index}", income_total, 2),
+            _number_cell(f"C{row_index}", -abs(expense_total), 3),
+            _number_cell(f"D{row_index}", balance, balance_style),
+        ]
+        sheet_rows.append(f"<row r=\"{row_index}\">{''.join(cells)}</row>")
+
+    summary_header_row = len(rows) + 3
+    summary_header_cells = [
+        _inline_string_cell(f"A{summary_header_row}", "Saldo inicial", style=1),
+        _inline_string_cell(f"B{summary_header_row}", "Saldo final", style=1),
+        _inline_string_cell(f"C{summary_header_row}", "Balance saldo caja", style=1),
+    ]
+    sheet_rows.append(f"<row r=\"{summary_header_row}\">{''.join(summary_header_cells)}</row>")
+
+    summary_value_row = summary_header_row + 1
+    summary_cells = [
+        _number_cell(f"A{summary_value_row}", opening_balance, 5),
+        _number_cell(f"B{summary_value_row}", closing_balance, 5),
+        _number_cell(
+            f"C{summary_value_row}",
+            net_balance,
+            2 if net_balance > 0 else 3 if net_balance < 0 else 4,
+        ),
+    ]
+    sheet_rows.append(f"<row r=\"{summary_value_row}\">{''.join(summary_cells)}</row>")
+
+    return _build_workbook(
+        sheet_rows=sheet_rows,
+        header_count=len(headers),
+        column_widths=[18, 16, 16, 14],
+        sheet_name=f"Resumen {selected_year}",
+    )

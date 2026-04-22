@@ -30,6 +30,7 @@ from services.free_expenses import (
     FREE_EXPENSE_CATEGORIES,
     FREE_EXPENSE_HEADERS,
     create_free_expense,
+    delete_free_expense,
     free_expense_category_label,
     list_free_expenses,
 )
@@ -53,7 +54,8 @@ from services.auth import (
     update_password,
     delete_user,
 )
-from services.purchases import list_purchase_history
+from services.app_settings import ensure_app_settings, get_app_zoom_percent, set_app_setting
+from services.purchases import delete_purchase, list_purchase_history
 from services.legacy_migration import migrate_legacy_dataset
 from services.inventory import (
     PRODUCT_HEADERS, MOV_HEADERS,
@@ -70,11 +72,12 @@ from services.inventory import (
 from services.invoices import (
     INVOICE_HEADERS, INVOICE_LINE_HEADERS,
     create_invoice, list_invoices, list_invoice_lines,
+    delete_invoice,
     list_invoice_lines_for_ids,
     find_invoice, list_invoice_lines_for,
 )
 from services.receipt_printer import format_invoice_ticket, format_shopping_list_ticket, print_text_ticket
-from services.excel_export import build_cash_detail_workbook
+from services.excel_export import build_cash_annual_workbook, build_cash_detail_workbook
 from services.pdf_export import build_markdown_pdf
 
 def create_app() -> Flask:
@@ -96,6 +99,7 @@ def create_app() -> Flask:
     ensure_csv(config.CSV_LOGS, AUDIT_HEADERS)
     ensure_csv(config.CSV_CAJA, CASHBOX_HEADERS)
     ensure_csv(config.CSV_GASTOS_LIBRES, FREE_EXPENSE_HEADERS)
+    ensure_app_settings(config.CSV_APP_SETTINGS, backup_dir=config.BACKUP_DIR)
     ensure_user_schema(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR)
     ensure_product_schema(config.CSV_PRODUCTOS, backup_dir=config.BACKUP_DIR)
     ensure_group_catalog(
@@ -211,6 +215,17 @@ def create_app() -> Flask:
         if current["g"]:
             params["g"] = current["g"]
         return redirect(url_for(endpoint, **params))
+
+    def history_redirect_params() -> dict[str, str]:
+        params = {}
+        for key in ("q", "from", "to"):
+            value = (request.form.get(key) or request.args.get(key) or "").strip()
+            if value:
+                params[key] = value
+        return params
+
+    def wants_cash_update() -> bool:
+        return (request.form.get("update_cash") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 
     def simple_browser_state(endpoint: str, current_filters: dict[str, str], total: int) -> dict[str, object]:
         return {
@@ -425,6 +440,8 @@ def create_app() -> Flask:
             "grupos": "grupos",
             "migracion-legacy": "migracion",
             "migracion": "migracion",
+            "pantalla": "pantalla",
+            "zoom": "pantalla",
             "logs-uso": "logs",
             "logs": "logs",
         }
@@ -436,6 +453,7 @@ def create_app() -> Flask:
             "usuarios": "configuracion_usuarios",
             "grupos": "configuracion_grupos",
             "migracion": "configuracion_migracion",
+            "pantalla": "configuracion_pantalla",
             "logs": "configuracion_logs",
         }
         key = config_section_key(section)
@@ -450,6 +468,7 @@ def create_app() -> Flask:
             ("usuarios", "Configurar usuarios", url_for("configuracion_usuarios")),
             ("grupos", "Gestionar grupos", url_for("configuracion_grupos")),
             ("migracion", "Migracion legacy", url_for("configuracion_migracion")),
+            ("pantalla", "Pantalla y zoom", url_for("configuracion_pantalla")),
             ("logs", "Revisar logs de uso", url_for("configuracion_logs")),
         ]
         return [
@@ -1527,8 +1546,10 @@ def create_app() -> Flask:
                             "configuracion_usuarios",
                             "configuracion_grupos",
                             "configuracion_migracion",
+                            "configuracion_pantalla",
                             "configuracion_logs",
                             "actualizar_saldo_caja",
+                            "actualizar_zoom_app",
                             "crear_grupo_config",
                             "reasignar_grupo_config",
                             "eliminar_grupo_config",
@@ -1545,6 +1566,8 @@ def create_app() -> Flask:
             "shell_nav_items": nav_items,
             "today_label": date.today().strftime("%d/%m/%Y"),
             "low_resource_mode": config.LOW_RESOURCE_MODE,
+            "app_zoom_percent": get_app_zoom_percent(config.CSV_APP_SETTINGS),
+            "app_zoom_scale": get_app_zoom_percent(config.CSV_APP_SETTINGS) / 100.0,
         }
 
     def print_invoice_ticket(factura_id: str) -> None:
@@ -1640,9 +1663,6 @@ def create_app() -> Flask:
         if not verify_login(config.CSV_USUARIOS, username, current_password):
             flash("La contraseña actual no es correcta.")
             return redirect_to_user_area()
-        if len(new_password) < 4:
-            flash("La nueva contraseña debe tener al menos 4 caracteres.")
-            return redirect_to_user_area()
         if new_password != repeat_password:
             flash("La nueva contraseña y la repetición no coinciden.")
             return redirect_to_user_area()
@@ -1668,9 +1688,6 @@ def create_app() -> Flask:
 
         if not username:
             flash("El nombre de usuario es obligatorio.")
-            return redirect_to_config("usuarios")
-        if len(password) < 4:
-            flash("La contraseña debe tener al menos 4 caracteres.")
             return redirect_to_config("usuarios")
 
         try:
@@ -1871,6 +1888,51 @@ def create_app() -> Flask:
             config_subtitle="Sustituye usuarios, inventario y facturas por la version antigua, y fija la caja con saldo inicial anual y saldo actual.",
             config_nav=config_shortcuts("migracion"),
         )
+
+    @app.get("/configuracion/pantalla")
+    def configuracion_pantalla():
+        r = require_admin()
+        if r:
+            return r
+
+        current_zoom = get_app_zoom_percent(config.CSV_APP_SETTINGS)
+        return render_template(
+            "configuracion.html",
+            title="Pantalla y zoom",
+            config_section="pantalla",
+            config_title="Pantalla y zoom",
+            config_subtitle="Fija el zoom con el que la aplicación se abrirá por defecto en este equipo.",
+            config_nav=config_shortcuts("pantalla"),
+            app_zoom_percent=current_zoom,
+            app_zoom_options=[80, 90, 100, 110, 125, 150],
+        )
+
+    @app.post("/configuracion/pantalla")
+    def actualizar_zoom_app():
+        r = require_admin()
+        if r:
+            return r
+
+        raw_zoom = (request.form.get("app_zoom_percent") or "").strip()
+        try:
+            zoom_percent = int(raw_zoom)
+        except ValueError:
+            flash("El zoom indicado no es válido.")
+            return redirect_to_config("pantalla")
+
+        if zoom_percent < 50 or zoom_percent > 200:
+            flash("El zoom debe estar entre 50% y 200%.")
+            return redirect_to_config("pantalla")
+
+        set_app_setting(
+            config.CSV_APP_SETTINGS,
+            key="app_zoom_percent",
+            value=str(zoom_percent),
+            updated_by=session.get("user", ""),
+            backup_dir=config.BACKUP_DIR,
+        )
+        flash("Zoom de apertura actualizado ✅")
+        return redirect_to_config("pantalla")
 
     @app.post("/configuracion/migracion")
     def ejecutar_migracion_legacy():
@@ -2188,11 +2250,11 @@ def create_app() -> Flask:
             },
             annual_year_options=annual_year_options,
             annual_summary=annual_summary,
-            annual_pdf_href=url_for("descargar_analisis_resumen_anual_pdf", year=selected_annual_year),
+            annual_export_href=url_for("export_analisis_resumen_anual", year=selected_annual_year),
         )
 
-    @app.get("/analisis/resumen-anual/pdf")
-    def descargar_analisis_resumen_anual_pdf():
+    @app.get("/analisis/resumen-anual/export")
+    def export_analisis_resumen_anual():
         r = require_admin()
         if r:
             return r
@@ -2207,12 +2269,20 @@ def create_app() -> Flask:
             annual_year_options,
         )
         annual_summary = build_analysis_annual_summary(selected_annual_year)
-        markdown_text = build_analysis_annual_markdown(selected_annual_year, annual_summary)
-        pdf_bytes = build_markdown_pdf(f"Resumen anual {selected_annual_year}", markdown_text)
+        workbook = build_cash_annual_workbook(
+            annual_summary["rows"],
+            selected_year=selected_annual_year,
+            opening_balance=float(annual_summary["opening_balance"]),
+            closing_balance=float(annual_summary["closing_balance"]),
+            net_balance=float(annual_summary["net_balance"]),
+        )
 
-        response = Response(pdf_bytes, mimetype="application/pdf")
+        response = Response(
+            workbook,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
         response.headers["Content-Disposition"] = (
-            f'attachment; filename="resumen_anual_{selected_annual_year}.pdf"'
+            f'attachment; filename="resumen_anual_{selected_annual_year}.xlsx"'
         )
         return response
 
@@ -2998,11 +3068,7 @@ def create_app() -> Flask:
         if r:
             return r
 
-        redirect_params = {}
-        for key in ("q", "from", "to"):
-            value = (request.form.get(key) or "").strip()
-            if value:
-                redirect_params[key] = value
+        redirect_params = history_redirect_params()
 
         invoice = find_invoice(config.CSV_FACTURAS, factura_id)
         if not invoice:
@@ -3015,6 +3081,55 @@ def create_app() -> Flask:
         except (ValueError, RuntimeError) as exc:
             flash(f"No se pudo imprimir la factura {factura_id}: {exc}")
 
+        return redirect(url_for("historial_facturas", **redirect_params))
+
+    @app.post("/facturas/<factura_id>/eliminar")
+    def eliminar_factura(factura_id: str):
+        r = require_admin()
+        if r:
+            return r
+
+        redirect_params = history_redirect_params()
+        deleted = delete_invoice(
+            config.CSV_FACTURAS,
+            config.CSV_FACTURA_LINEAS,
+            config.CSV_MOVS,
+            factura_id,
+            backup_dir=config.BACKUP_DIR,
+        )
+        if not deleted:
+            flash("Factura no encontrada.")
+            return redirect(url_for("historial_facturas", **redirect_params))
+
+        invoice = deleted["invoice"]
+        amount = round(safe_float(invoice.get("total_importe")), 2)
+        user = session.get("user", "")
+        cash_updated = False
+        if wants_cash_update() and abs(amount) > 1e-9:
+            adjust_cash_balance(
+                config.CSV_CAJA,
+                delta=-amount,
+                updated_by=user,
+                note=f"Eliminación factura {factura_id}",
+            )
+            cash_updated = True
+
+        refresh_cash_analysis_storage(force=True)
+        log_action(
+            config.CSV_LOGS,
+            user,
+            "ELIMINAR FACTURA",
+            (
+                f"ref={factura_id} | total={amount:.2f} | "
+                f"lineas={deleted['removed_line_count']} | "
+                f"movs={deleted['removed_movement_count']} | "
+                f"actualiza_caja={'si' if cash_updated else 'no'}"
+            ),
+        )
+        flash(
+            "Factura eliminada ✅"
+            + (f" Caja ajustada {-amount:.2f} €." if cash_updated else "")
+        )
         return redirect(url_for("historial_facturas", **redirect_params))
 
     @app.get("/compras/historial")
@@ -3157,6 +3272,51 @@ def create_app() -> Flask:
         if r:
             return r
         return redirect_to_config("logs-uso")
+
+    @app.post("/compras/<ref_id>/eliminar")
+    def eliminar_compra(ref_id: str):
+        r = require_admin()
+        if r:
+            return r
+
+        redirect_params = history_redirect_params()
+        deleted = delete_purchase(
+            config.CSV_MOVS,
+            ref_id,
+            backup_dir=config.BACKUP_DIR,
+        )
+        if not deleted:
+            flash("Compra no encontrada.")
+            return redirect(url_for("historial_compras", **redirect_params))
+
+        amount = round(float(deleted["total_importe"]), 2)
+        user = session.get("user", "")
+        cash_updated = False
+        if wants_cash_update() and abs(amount) > 1e-9:
+            adjust_cash_balance(
+                config.CSV_CAJA,
+                delta=amount,
+                updated_by=user,
+                note=f"Eliminación compra {ref_id}",
+            )
+            cash_updated = True
+
+        refresh_cash_analysis_storage(force=True)
+        log_action(
+            config.CSV_LOGS,
+            user,
+            "ELIMINAR COMPRA",
+            (
+                f"ref={ref_id} | total={amount:.2f} | "
+                f"lineas={deleted['lineas']} | "
+                f"actualiza_caja={'si' if cash_updated else 'no'}"
+            ),
+        )
+        flash(
+            "Compra eliminada ✅"
+            + (f" Caja ajustada +{amount:.2f} €." if cash_updated else "")
+        )
+        return redirect(url_for("historial_compras", **redirect_params))
 
     @app.get("/supervision/export")
     def export_supervision():
@@ -3576,6 +3736,51 @@ def create_app() -> Flask:
             ["fecha", "gasto_id", "categoria", "descripcion", "importe", "usuario"],
             rows,
         )
+
+    @app.post("/gastos/<expense_id>/eliminar")
+    def eliminar_gasto_libre(expense_id: str):
+        r = require_admin()
+        if r:
+            return r
+
+        redirect_params = history_redirect_params()
+        deleted = delete_free_expense(
+            config.CSV_GASTOS_LIBRES,
+            expense_id,
+            backup_dir=config.BACKUP_DIR,
+        )
+        if not deleted:
+            flash("Gasto no encontrado.")
+            return redirect(url_for("historial_gastos_libres", **redirect_params))
+
+        amount = round(safe_float(deleted.get("importe")), 2)
+        user = session.get("user", "")
+        cash_updated = False
+        if wants_cash_update() and abs(amount) > 1e-9:
+            adjust_cash_balance(
+                config.CSV_CAJA,
+                delta=amount,
+                updated_by=user,
+                note=f"Eliminación gasto libre {expense_id}",
+            )
+            cash_updated = True
+
+        refresh_cash_analysis_storage(force=True)
+        log_action(
+            config.CSV_LOGS,
+            user,
+            "ELIMINAR GASTO",
+            (
+                f"ref={expense_id} | total={amount:.2f} | "
+                f"categoria={(deleted.get('categoria') or '').strip()} | "
+                f"actualiza_caja={'si' if cash_updated else 'no'}"
+            ),
+        )
+        flash(
+            "Gasto eliminado ✅"
+            + (f" Caja ajustada +{amount:.2f} €." if cash_updated else "")
+        )
+        return redirect(url_for("historial_gastos_libres", **redirect_params))
 
     return app
 

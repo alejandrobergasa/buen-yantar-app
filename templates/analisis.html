@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 
+<div class="analysis-page-shell">
+
 <section class="panel analysis-selector-panel">
   <div class="analysis-selector-grid">
     {% for item in analysis_views %}
@@ -155,7 +157,7 @@
         </select>
       </div>
       <div class="actions analysis-filter-actions">
-        <a class="btn btn-secondary" href="{{ annual_pdf_href }}">Descargar PDF</a>
+        <a class="btn btn-secondary" href="{{ annual_export_href }}">Descargar Excel</a>
         <a class="btn btn-secondary" href="{{ url_for('analisis', view='resumen-anual') }}">Restablecer</a>
       </div>
     </div>
@@ -213,6 +215,8 @@
   </div>
 </section>
 {% endif %}
+
+</div>
 
 <script>
   function bindAnalysisAutoSubmit(formId, allowedNames) {

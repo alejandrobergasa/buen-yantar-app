@@ -76,6 +76,7 @@
   const purchaseConfirmNote = document.getElementById("purchaseConfirmNote");
   const purchaseConfirmTotal = document.getElementById("purchaseConfirmTotal");
   const selectedById = new Map();
+  const draftKey = "buen-yantar:purchase-draft:low:v1";
   let purchaseConfirmAccepted = false;
 
   function productDataFromRow(sourceRow) {
@@ -90,6 +91,55 @@
       salePrice: sourceRow.dataset.salePrice || "",
       originalSalePrice: sourceRow.dataset.salePrice || "",
     };
+  }
+
+  function serializeDraft() {
+    return {
+      filters: {
+        q: (searchBox && searchBox.value || "").trim(),
+        g: (groupFilter && groupFilter.value || "").trim(),
+      },
+      fields: {
+        fecha_compra: purchaseForm.querySelector('[name="fecha_compra"]').value || "",
+        nota_global: purchaseForm.querySelector('[name="nota_global"]').value || "",
+      },
+      lines: Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => ({
+        pid: row.querySelector(".ticket-product-id").value || "",
+        name: row.querySelector(".ticket-product-name")?.textContent?.replace(/^[^\s]+\s/, "") || "",
+        emoji: row.querySelector(".ticket-product-name")?.textContent?.trim().split(/\s+/)[0] || "📦",
+        stockUnit: row.dataset.stockUnit || "ud",
+        saleUnit: row.dataset.saleUnit || "ud",
+        fractional: row.dataset.fractional === "1",
+        fractions: row.dataset.fractions || "1",
+        salePrice: row.querySelector('input[name="precio_venta_actual[]"]').value || "",
+        originalSalePrice: row.dataset.originalSalePrice || "",
+        qty: row.querySelector('input[name="cantidad[]"]').value || "",
+        price: row.querySelector('input[name="precio_compra[]"]').value || "",
+        subtotal: row.querySelector('input[name="subtotal_compra[]"]').value || "",
+        note: row.querySelector('input[name="nota_linea[]"]').value || "",
+      })),
+    };
+  }
+
+  function hasDraftContent() {
+    return (
+      selectedById.size > 0
+      || ((searchBox && searchBox.value || "").trim() !== "")
+      || ((groupFilter && groupFilter.value || "").trim() !== "")
+      || ((purchaseForm.querySelector('[name="nota_global"]').value || "").trim() !== "")
+    );
+  }
+
+  function saveDraft() {
+    if (!hasDraftContent()) {
+      sessionStorage.removeItem(draftKey);
+      return;
+    }
+    sessionStorage.setItem(draftKey, JSON.stringify(serializeDraft()));
+  }
+
+  function clearDraft() {
+    sessionStorage.removeItem(draftKey);
   }
 
   function syncSelectedState() {
@@ -380,15 +430,26 @@
     const pid = row.querySelector(".ticket-product-id").value;
 
     [qtyInput, unitPriceInput, subtotalInput].forEach((input) => {
-      input.addEventListener("input", () => syncLinePricing(row));
+      input.addEventListener("input", () => {
+        syncLinePricing(row);
+        saveDraft();
+      });
     });
-    if (salePriceInput) salePriceInput.addEventListener("input", refreshSummary);
+    if (salePriceInput) {
+      salePriceInput.addEventListener("input", () => {
+        refreshSummary();
+        saveDraft();
+      });
+    }
+    const noteInput = row.querySelector('input[name="nota_linea[]"]');
+    if (noteInput) noteInput.addEventListener("input", saveDraft);
     if (removeBtn) {
       removeBtn.addEventListener("click", () => {
         selectedById.delete(pid);
         row.remove();
         refreshEmptyState();
         refreshSummary();
+        saveDraft();
       });
     }
   }
@@ -435,12 +496,14 @@
       const currentQty = parseNumber(qtyInput.value);
       qtyInput.value = String((currentQty !== null && !Number.isNaN(currentQty) ? currentQty : 0) + 1);
       syncLinePricing(existingRow);
+      saveDraft();
       qtyInput.focus();
       qtyInput.select();
       return;
     }
 
     appendPurchaseRow(productDataFromRow(sourceRow));
+    saveDraft();
   }
 
   function applyProductFilters() {
@@ -478,10 +541,14 @@
 
   if (purchaseFiltersForm) {
     const submitFilters = debounce(() => {
+      saveDraft();
       purchaseFiltersForm.requestSubmit();
     }, 180);
     if (searchBox) searchBox.addEventListener("input", submitFilters);
-    if (groupFilter) groupFilter.addEventListener("change", () => purchaseFiltersForm.requestSubmit());
+    if (groupFilter) groupFilter.addEventListener("change", () => {
+      saveDraft();
+      purchaseFiltersForm.requestSubmit();
+    });
   } else {
     if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
     if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
@@ -511,6 +578,7 @@
   purchaseForm.addEventListener("submit", (event) => {
     if (purchaseConfirmAccepted) {
       purchaseConfirmAccepted = false;
+      clearDraft();
       return;
     }
     const rows = Array.from(purchaseLines.querySelectorAll(".purchase-row"));
@@ -572,6 +640,53 @@
     event.preventDefault();
     openPurchaseConfirmDialog();
   });
+
+  (function restoreDraft() {
+    const raw = sessionStorage.getItem(draftKey);
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw);
+      if (draft.filters) {
+        if (searchBox) searchBox.value = draft.filters.q || (searchBox.value || "");
+        if (groupFilter) groupFilter.value = draft.filters.g || (groupFilter.value || "");
+      }
+      if (draft.fields) {
+        purchaseForm.querySelector('[name="fecha_compra"]').value = draft.fields.fecha_compra || purchaseForm.querySelector('[name="fecha_compra"]').value;
+        purchaseForm.querySelector('[name="nota_global"]').value = draft.fields.nota_global || "";
+      }
+      if (Array.isArray(draft.lines)) {
+        draft.lines.forEach((line) => {
+          if (!line || !line.pid || selectedById.has(line.pid)) return;
+          const sourceRow = productRows.find((tr) => tr.dataset.productId === line.pid);
+          const baseData = sourceRow ? productDataFromRow(sourceRow) : {
+            pid: line.pid,
+            name: line.name || line.pid,
+            emoji: line.emoji || "📦",
+            stockUnit: line.stockUnit || "ud",
+            saleUnit: line.saleUnit || line.stockUnit || "ud",
+            fractional: Boolean(line.fractional),
+            fractions: line.fractions || "1",
+            salePrice: line.salePrice || "",
+            originalSalePrice: line.originalSalePrice || line.salePrice || "",
+          };
+          appendPurchaseRow(
+            {
+              ...baseData,
+              qty: line.qty || "",
+              price: line.price || "",
+              subtotal: line.subtotal || "",
+              salePrice: line.salePrice || baseData.salePrice || "",
+              originalSalePrice: line.originalSalePrice || baseData.originalSalePrice || "",
+              note: line.note || "",
+            },
+            { focus: false }
+          );
+        });
+      }
+    } catch (error) {
+      clearDraft();
+    }
+  })();
 
   if (!purchaseFiltersForm) {
     applyProductFilters();

@@ -84,7 +84,7 @@
     </div>
   </section>
 
-  <aside class="home-side-panels">
+  <aside class="home-side-panels home-side-panels-single">
     {% if g.is_admin and cash_state %}
     <section class="panel home-side-panel">
       <div class="section-head compact-head">
@@ -104,7 +104,7 @@
     </section>
     {% endif %}
 
-    <section class="panel home-side-panel">
+    <section class="panel home-side-panel home-side-panel-stock">
       <div class="section-head compact-head">
         <div>
           <h2 class="section-heading">Productos con stock bajo</h2>
@@ -133,28 +133,6 @@
       {% endif %}
     </section>
 
-    <section class="panel home-side-panel">
-      <div class="section-head compact-head">
-        <div>
-          <h2 class="section-heading">Actividad reciente</h2>
-        </div>
-      </div>
-
-      {% if recent_activity %}
-      <div class="home-compact-list home-scroll-list">
-        {% for item in recent_activity %}
-        <a class="home-compact-item home-compact-item-activity" href="{{ item.href }}">
-          <strong class="home-compact-kind">{{ item.icon }} {{ item.label }}</strong>
-          <span class="home-compact-user">{{ item.user }}</span>
-          <span class="home-compact-date">{{ item.date or "-" }}</span>
-          <span class="home-compact-delta {{ item.cash_delta_class }}">{{ item.cash_delta }}</span>
-        </a>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="empty">Todavia no hay actividad reciente.</div>
-      {% endif %}
-    </section>
   </aside>
 </div>
 
