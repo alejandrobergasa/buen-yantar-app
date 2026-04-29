@@ -22,6 +22,8 @@
   --radius-sm: 0.75rem;
   --shadow: 0 10px 30px rgba(23, 32, 38, 0.08);
   --shadow-soft: 0 5px 18px rgba(23, 32, 38, 0.06);
+  --layer-dropdown: 40;
+  --layer-popover: 80;
 
   font-size: clamp(15px, 1.2vw, 18px);
 }
@@ -2670,17 +2672,31 @@ body {
 }
 
 .route-configuracion_grupos .group-config-layout {
+  flex: 0 0 auto;
   min-height: 0;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
 }
 
 .route-configuracion_grupos .group-config-layout > .panel {
   display: flex;
   flex-direction: column;
+  min-height: clamp(9.5rem, 21dvh, 11.5rem);
+}
+
+.route-configuracion_grupos .group-config-form,
+.route-configuracion_grupos .group-config-layout form {
+  flex: 1 1 auto;
+  align-content: space-between;
+}
+
+.route-configuracion_grupos .group-config-layout .actions {
+  margin-top: auto;
+  padding-top: 0.15rem;
 }
 
 .route-configuracion_grupos .group-table-card {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4738,7 +4754,7 @@ body.route-analisis {
   position: absolute;
   top: calc(100% + 0.35rem);
   left: 0;
-  z-index: 12;
+  z-index: var(--layer-dropdown);
   width: min(19rem, 100vw - 2rem);
   padding: 0.6rem;
   border: 1px solid rgba(31, 109, 95, 0.14);
@@ -4750,6 +4766,15 @@ body.route-analisis {
 .emoji-picker-menu-up {
   top: auto;
   bottom: calc(100% + 0.35rem);
+}
+
+.emoji-picker-menu-floating {
+  position: fixed;
+  top: var(--emoji-menu-top, 0);
+  left: var(--emoji-menu-left, 0);
+  bottom: auto;
+  z-index: var(--layer-popover);
+  width: var(--emoji-menu-width, min(19rem, calc(100vw - 2rem)));
 }
 
 .emoji-picker-scroll {

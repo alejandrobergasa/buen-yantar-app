@@ -176,6 +176,39 @@
 
               <div class="grid-2">
                 <div>
+                  <label class="label">Grupo</label>
+                  <select class="input js-live-field" name="grupo_select" id="grupoSelect" data-rule="required">
+                    {% for g, e in group_options %}
+                      <option value="{{ g }}" data-emoji="{{ e }}">{{ g }}</option>
+                    {% endfor %}
+                    <option value="__new__">Nuevo grupo...</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="newGroupFields" hidden aria-hidden="true">
+                <div class="grid-2">
+                  <div>
+                    <label class="label">Nombre del grupo</label>
+                    <input class="input js-live-field" name="grupo_custom" data-rule="required-when-new-group" placeholder="Ej: Verduras">
+                  </div>
+                  <div>
+                    <label class="label">Icono del grupo</label>
+                    <input type="hidden" class="js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group">
+                    <div class="emoji-picker" id="groupEmojiPicker">
+                      <button class="input emoji-picker-trigger" type="button" id="groupEmojiTrigger" aria-expanded="false" aria-controls="groupEmojiMenu">
+                        <span class="emoji-picker-value" id="groupEmojiValue">Selecciona un icono</span>
+                      </button>
+                      <div class="emoji-picker-menu" id="groupEmojiMenu" hidden>
+                        <div class="emoji-picker-scroll" id="groupEmojiScroll"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid-2">
+                <div>
                   <label class="label">Precio venta / unidad</label>
                   <input class="input js-live-field" name="precio_unitario" data-rule="number" placeholder="Ej: 1.20">
                 </div>
@@ -210,39 +243,6 @@
                 <div>
                   <label class="label">Stock actual (unidad compra / stock)</label>
                   <input class="input js-live-field" name="stock_actual" data-rule="required-number-when-finite" placeholder="Ej: 20">
-                </div>
-              </div>
-
-              <div class="grid-2">
-                <div>
-                  <label class="label">Grupo</label>
-                  <select class="input js-live-field" name="grupo_select" id="grupoSelect" data-rule="required">
-                    {% for g, e in group_options %}
-                      <option value="{{ g }}" data-emoji="{{ e }}">{{ g }}</option>
-                    {% endfor %}
-                    <option value="__new__">Nuevo grupo...</option>
-                  </select>
-                </div>
-              </div>
-
-              <div id="newGroupFields" hidden aria-hidden="true">
-                <div class="grid-2">
-                  <div>
-                    <label class="label">Nombre del grupo</label>
-                    <input class="input js-live-field" name="grupo_custom" data-rule="required-when-new-group" placeholder="Ej: Verduras">
-                  </div>
-                  <div>
-                    <label class="label">Icono del grupo</label>
-                    <input type="hidden" class="js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group">
-                    <div class="emoji-picker" id="groupEmojiPicker">
-                      <button class="input emoji-picker-trigger" type="button" id="groupEmojiTrigger" aria-expanded="false" aria-controls="groupEmojiMenu">
-                        <span class="emoji-picker-value" id="groupEmojiValue">Selecciona un icono</span>
-                      </button>
-                      <div class="emoji-picker-menu" id="groupEmojiMenu" hidden>
-                        <div class="emoji-picker-scroll" id="groupEmojiScroll"></div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
 

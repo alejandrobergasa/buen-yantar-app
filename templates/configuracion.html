@@ -447,6 +447,17 @@
       object: "Objetos",
     };
     const pickers = Array.from(document.querySelectorAll("[data-emoji-picker]"));
+    const pickerMenus = new WeakMap();
+
+    pickers.forEach((picker) => {
+      const menu = picker.querySelector("[data-emoji-menu]");
+      if (!menu) return;
+      pickerMenus.set(picker, menu);
+    });
+
+    function getPickerMenu(picker) {
+      return pickerMenus.get(picker) || picker.querySelector("[data-emoji-menu]");
+    }
 
     function groupedChoices() {
       const groups = {};
@@ -462,10 +473,17 @@
 
     function closePicker(picker) {
       const trigger = picker.querySelector("[data-emoji-trigger]");
-      const menu = picker.querySelector("[data-emoji-menu]");
+      const menu = getPickerMenu(picker);
       if (!trigger || !menu) return;
       menu.hidden = true;
-      menu.classList.remove("emoji-picker-menu-up");
+      menu.classList.remove("emoji-picker-menu-up", "emoji-picker-menu-floating");
+      menu.style.removeProperty("--emoji-menu-top");
+      menu.style.removeProperty("--emoji-menu-left");
+      menu.style.removeProperty("--emoji-menu-width");
+      menu.style.visibility = "";
+      if (menu.parentElement !== picker) {
+        picker.appendChild(menu);
+      }
       trigger.setAttribute("aria-expanded", "false");
     }
 
@@ -479,6 +497,7 @@
     function updatePickerUI(picker) {
       const input = picker.querySelector("[data-emoji-input]");
       const valueHost = picker.querySelector("[data-emoji-value]");
+      const menu = getPickerMenu(picker);
       const value = input && input.value ? input.value : "package";
       if (valueHost) {
         valueHost.textContent = "";
@@ -487,13 +506,15 @@
           className: "emoji-icon emoji-inline",
         }));
       }
-      picker.querySelectorAll(".emoji-option").forEach((button) => {
+      if (!menu) return;
+      menu.querySelectorAll(".emoji-option").forEach((button) => {
         button.classList.toggle("emoji-option-selected", button.dataset.emojiKey === value);
       });
     }
 
     function renderPicker(picker) {
-      const scroll = picker.querySelector("[data-emoji-scroll]");
+      const menu = getPickerMenu(picker);
+      const scroll = menu ? menu.querySelector("[data-emoji-scroll]") : null;
       const input = picker.querySelector("[data-emoji-input]");
       if (!scroll || !input) return;
       scroll.textContent = "";
@@ -546,11 +567,14 @@
 
     function openPicker(picker) {
       const trigger = picker.querySelector("[data-emoji-trigger]");
-      const menu = picker.querySelector("[data-emoji-menu]");
-      const scroll = picker.querySelector("[data-emoji-scroll]");
+      const menu = getPickerMenu(picker);
+      const scroll = menu ? menu.querySelector("[data-emoji-scroll]") : null;
       if (!trigger || !menu || !scroll) return;
       closeAllPickers(picker);
       renderPicker(picker);
+      if (menu.parentElement !== document.body) {
+        document.body.appendChild(menu);
+      }
 
       const triggerRect = trigger.getBoundingClientRect();
       const margin = 18;
@@ -558,10 +582,27 @@
       const spaceAbove = triggerRect.top - margin;
       const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
       const available = Math.max(180, shouldOpenUp ? spaceAbove - 16 : spaceBelow - 16);
+      const menuWidth = Math.min(304, window.innerWidth - (margin * 2));
 
-      menu.classList.toggle("emoji-picker-menu-up", shouldOpenUp);
       scroll.style.maxHeight = `${Math.min(360, available)}px`;
+      menu.classList.remove("emoji-picker-menu-up");
+      menu.classList.add("emoji-picker-menu-floating");
+      menu.style.setProperty("--emoji-menu-width", `${menuWidth}px`);
       menu.hidden = false;
+      menu.style.visibility = "hidden";
+
+      const menuHeight = menu.offsetHeight;
+      const left = Math.min(
+        Math.max(margin, triggerRect.left),
+        Math.max(margin, window.innerWidth - menuWidth - margin),
+      );
+      const top = shouldOpenUp
+        ? Math.max(margin, triggerRect.top - menuHeight - 6)
+        : Math.min(triggerRect.bottom + 6, window.innerHeight - menuHeight - margin);
+
+      menu.style.setProperty("--emoji-menu-left", `${left}px`);
+      menu.style.setProperty("--emoji-menu-top", `${Math.max(margin, top)}px`);
+      menu.style.visibility = "";
       trigger.setAttribute("aria-expanded", "true");
     }
 
@@ -570,7 +611,7 @@
       renderPicker(picker);
       if (!trigger) return;
       trigger.addEventListener("click", () => {
-        const menu = picker.querySelector("[data-emoji-menu]");
+        const menu = getPickerMenu(picker);
         if (!menu || menu.hidden) openPicker(picker);
         else closePicker(picker);
       });
@@ -579,12 +620,18 @@
     document.addEventListener("click", (event) => {
       const picker = event.target.closest("[data-emoji-picker]");
       if (picker) return;
+      if (event.target.closest("[data-emoji-menu]")) return;
       closeAllPickers();
     });
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeAllPickers();
     });
+    window.addEventListener("resize", () => closeAllPickers());
+    document.addEventListener("scroll", (event) => {
+      if (event.target && event.target.closest && event.target.closest("[data-emoji-menu]")) return;
+      closeAllPickers();
+    }, true);
   })();
 </script>
 {% elif config_section == "migracion" %}
