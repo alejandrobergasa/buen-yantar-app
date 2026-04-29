@@ -84,13 +84,13 @@
   </aside>
 </div>
 {% elif config_section == "usuarios" %}
-<div class="home-layout">
-  <section class="panel">
+<div class="home-layout user-settings-grid">
+  <section class="panel user-settings-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Tu acceso</h2>
     </div>
 
-    <form method="post" action="{{ url_for('cambiar_password') }}" class="form">
+    <form method="post" action="{{ url_for('cambiar_password') }}" class="form user-settings-form">
       <div class="grid-2">
         <div>
           <label class="label">Contraseña actual</label>
@@ -111,12 +111,12 @@
     </form>
   </section>
 
-  <section class="panel">
+  <section class="panel user-settings-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Alta de usuarios</h2>
     </div>
 
-    <form method="post" action="{{ url_for('crear_usuario') }}" class="form">
+    <form method="post" action="{{ url_for('crear_usuario') }}" class="form user-settings-form">
       <div class="grid-2">
         <div>
           <label class="label">Usuario</label>
@@ -127,7 +127,7 @@
           <input class="input" type="password" name="password" required>
         </div>
       </div>
-      <div class="grid-2">
+      <div class="grid-2 user-settings-role-row">
         <div>
           <label class="label">Rol</label>
           <select name="rol">
@@ -154,12 +154,12 @@
   </section>
 </div>
 
-<section class="panel table-card">
+<section class="panel table-card user-settings-table-card">
   <div class="section-head compact-head">
     <h2 class="section-heading">Usuarios registrados</h2>
   </div>
 
-  <div class="inv-scrollbox" style="max-height:56vh;">
+  <div class="inv-scrollbox user-settings-table-box">
     <table class="table">
       <thead>
         <tr>
@@ -295,21 +295,29 @@
   {% endif %}
 </section>
 {% elif config_section == "grupos" %}
-<div class="home-layout">
-  <section class="panel">
+<div class="home-layout group-config-layout">
+  <section class="panel group-config-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Nuevo grupo</h2>
     </div>
 
-    <form method="post" action="{{ url_for('crear_grupo_config') }}" class="form">
-      <div class="grid-2">
+    <form method="post" action="{{ url_for('crear_grupo_config') }}" class="form group-config-form">
+      <div class="grid-2 group-config-grid">
         <div>
           <label class="label">Nombre del grupo</label>
           <input class="input" name="nombre" placeholder="Ej: Vinos" required>
         </div>
         <div>
-          <label class="label">Emoji</label>
-          <input class="input" name="emoji" placeholder="Ej: 🍷" value="📦">
+          <label class="label">Icono</label>
+          <div class="emoji-picker group-emoji-picker" data-emoji-picker>
+            <input type="hidden" name="emoji" value="package" data-emoji-input>
+            <button class="btn btn-secondary emoji-picker-trigger" type="button" aria-expanded="false" data-emoji-trigger>
+              <span class="emoji-picker-value" data-emoji-value></span>
+            </button>
+            <div class="emoji-picker-menu" hidden data-emoji-menu>
+              <div class="emoji-picker-scroll" data-emoji-scroll></div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="actions">
@@ -318,7 +326,7 @@
     </form>
   </section>
 
-  <section class="panel">
+  <section class="panel group-config-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Reasignar productos</h2>
     </div>
@@ -330,7 +338,7 @@
           <select name="grupo_origen" required>
             <option value="">(Selecciona)</option>
             {% for group in groups %}
-            <option value="{{ group.nombre }}">{{ group.emoji }} {{ group.nombre }} ({{ group.product_count }})</option>
+            <option value="{{ group.nombre }}">{{ group.nombre }} ({{ group.product_count }})</option>
             {% endfor %}
           </select>
         </div>
@@ -339,7 +347,7 @@
           <select name="grupo_destino" required>
             <option value="">(Selecciona)</option>
             {% for group in groups %}
-            <option value="{{ group.nombre }}">{{ group.emoji }} {{ group.nombre }}</option>
+            <option value="{{ group.nombre }}">{{ group.nombre }}</option>
             {% endfor %}
           </select>
         </div>
@@ -351,7 +359,7 @@
   </section>
 </div>
 
-<section class="panel table-card">
+<section class="panel table-card group-table-card">
   <div class="section-head compact-head">
     <h2 class="section-heading">Grupos actuales</h2>
   </div>
@@ -380,17 +388,39 @@
       <thead>
         <tr>
           <th>Grupo</th>
-          <th>Emoji</th>
           <th>Productos</th>
+          <th>Editar</th>
           <th>Acción</th>
         </tr>
       </thead>
       <tbody>
         {% for group in groups %}
         <tr>
-          <td>{{ group.nombre }}</td>
-          <td>{{ group.emoji }}</td>
+          <td>
+            <span class="emoji-with-text group-name-chip">
+              {{ emoji_icon(group.emoji, alt=group.nombre, class_name="emoji-inline") }}
+              <span>{{ group.nombre }}</span>
+            </span>
+          </td>
           <td>{{ group.product_count }}</td>
+          <td>
+            <form method="post" action="{{ url_for('editar_grupo_config') }}" class="group-edit-form">
+              <input type="hidden" name="group_id" value="{{ group.group_id }}">
+              <div class="group-edit-fields">
+                <input class="input" name="nombre" value="{{ group.nombre }}" aria-label="Nombre del grupo {{ group.nombre }}" required>
+                <div class="emoji-picker group-emoji-picker" data-emoji-picker>
+                  <input type="hidden" name="emoji" value="{{ group.emoji or 'package' }}" data-emoji-input>
+                  <button class="btn btn-secondary btn-small emoji-picker-trigger" type="button" aria-expanded="false" data-emoji-trigger>
+                    <span class="emoji-picker-value" data-emoji-value></span>
+                  </button>
+                  <div class="emoji-picker-menu" hidden data-emoji-menu>
+                    <div class="emoji-picker-scroll" data-emoji-scroll></div>
+                  </div>
+                </div>
+                <button class="btn btn-secondary btn-small" type="submit">Guardar</button>
+              </div>
+            </form>
+          </td>
           <td>
             {% if group.product_count == 0 %}
             <form method="post" action="{{ url_for('eliminar_grupo_config') }}" onsubmit="return confirm('¿Eliminar este grupo vacío?')">
@@ -407,6 +437,156 @@
     </table>
   </div>
 </section>
+<script>
+  (() => {
+    const EMOJI_CHOICES = {{ emoji_picker_assets|tojson }};
+    const CATEGORY_ORDER = ["food", "drink", "object"];
+    const CATEGORY_LABELS = {
+      food: "Comida",
+      drink: "Bebidas",
+      object: "Objetos",
+    };
+    const pickers = Array.from(document.querySelectorAll("[data-emoji-picker]"));
+
+    function groupedChoices() {
+      const groups = {};
+      EMOJI_CHOICES.forEach((asset) => {
+        const category = asset.category || "object";
+        if (!groups[category]) groups[category] = [];
+        groups[category].push(asset);
+      });
+      return groups;
+    }
+
+    const choicesByCategory = groupedChoices();
+
+    function closePicker(picker) {
+      const trigger = picker.querySelector("[data-emoji-trigger]");
+      const menu = picker.querySelector("[data-emoji-menu]");
+      if (!trigger || !menu) return;
+      menu.hidden = true;
+      menu.classList.remove("emoji-picker-menu-up");
+      trigger.setAttribute("aria-expanded", "false");
+    }
+
+    function closeAllPickers(exceptPicker = null) {
+      pickers.forEach((picker) => {
+        if (picker === exceptPicker) return;
+        closePicker(picker);
+      });
+    }
+
+    function updatePickerUI(picker) {
+      const input = picker.querySelector("[data-emoji-input]");
+      const valueHost = picker.querySelector("[data-emoji-value]");
+      const value = input && input.value ? input.value : "package";
+      if (valueHost) {
+        valueHost.textContent = "";
+        const asset = window.BYEmoji.resolve(value);
+        valueHost.appendChild(window.BYEmoji.createInline(value, asset.label, {
+          className: "emoji-icon emoji-inline",
+        }));
+      }
+      picker.querySelectorAll(".emoji-option").forEach((button) => {
+        button.classList.toggle("emoji-option-selected", button.dataset.emojiKey === value);
+      });
+    }
+
+    function renderPicker(picker) {
+      const scroll = picker.querySelector("[data-emoji-scroll]");
+      const input = picker.querySelector("[data-emoji-input]");
+      if (!scroll || !input) return;
+      scroll.textContent = "";
+
+      CATEGORY_ORDER.forEach((category) => {
+        const items = choicesByCategory[category] || [];
+        if (!items.length) return;
+
+        const section = document.createElement("section");
+        section.className = "emoji-group";
+
+        const title = document.createElement("div");
+        title.className = "emoji-group-title";
+        title.textContent = CATEGORY_LABELS[category] || category;
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "emoji-picker-grid";
+
+        items.forEach((asset) => {
+          const button = document.createElement("button");
+          button.className = "emoji-option";
+          button.type = "button";
+          button.dataset.emojiKey = asset.key;
+          button.setAttribute("aria-label", `Elegir ${asset.label}`);
+          button.appendChild(window.BYEmoji.createImage(asset.key, {
+            alt: asset.label,
+            className: "emoji-icon emoji-button-icon",
+          }));
+
+          const label = document.createElement("span");
+          label.textContent = asset.label;
+          button.appendChild(label);
+
+          button.addEventListener("click", () => {
+            input.value = asset.key;
+            updatePickerUI(picker);
+            closePicker(picker);
+          });
+
+          grid.appendChild(button);
+        });
+
+        section.appendChild(grid);
+        scroll.appendChild(section);
+      });
+
+      updatePickerUI(picker);
+    }
+
+    function openPicker(picker) {
+      const trigger = picker.querySelector("[data-emoji-trigger]");
+      const menu = picker.querySelector("[data-emoji-menu]");
+      const scroll = picker.querySelector("[data-emoji-scroll]");
+      if (!trigger || !menu || !scroll) return;
+      closeAllPickers(picker);
+      renderPicker(picker);
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const margin = 18;
+      const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
+      const spaceAbove = triggerRect.top - margin;
+      const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const available = Math.max(180, shouldOpenUp ? spaceAbove - 16 : spaceBelow - 16);
+
+      menu.classList.toggle("emoji-picker-menu-up", shouldOpenUp);
+      scroll.style.maxHeight = `${Math.min(360, available)}px`;
+      menu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    }
+
+    pickers.forEach((picker) => {
+      const trigger = picker.querySelector("[data-emoji-trigger]");
+      renderPicker(picker);
+      if (!trigger) return;
+      trigger.addEventListener("click", () => {
+        const menu = picker.querySelector("[data-emoji-menu]");
+        if (!menu || menu.hidden) openPicker(picker);
+        else closePicker(picker);
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      const picker = event.target.closest("[data-emoji-picker]");
+      if (picker) return;
+      closeAllPickers();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeAllPickers();
+    });
+  })();
+</script>
 {% elif config_section == "migracion" %}
 <div class="settings-grid">
   <section class="panel">

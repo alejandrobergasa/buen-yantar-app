@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Coctel">
+  <path d="M16 18h32L34 34v12h8v4H22v-4h8V34z" fill="#ef7d7d"/>
+  <path d="M16 18h32L34 34z" fill="#f3d175"/>
+  <path d="M22 14l6 6" stroke="#5ca94a" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="42" cy="14" r="5" fill="#ff9b5a"/>
+</svg>

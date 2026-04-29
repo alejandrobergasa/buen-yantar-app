@@ -6,6 +6,106 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script>
+    window.BYEmoji = (() => {
+      const assets = {{ emoji_assets_json|safe }};
+      const byKey = {};
+      const byValue = {};
+
+      assets.forEach((asset) => {
+        byKey[asset.key] = asset;
+        byValue[asset.key] = asset;
+        byValue[asset.char] = asset;
+        byValue[String(asset.char || "").replace(/\uFE0F/g, "")] = asset;
+        (asset.aliases || []).forEach((alias) => {
+          byValue[alias] = asset;
+          byValue[String(alias || "").replace(/\uFE0F/g, "")] = asset;
+        });
+      });
+
+      const emojiValues = Object.keys(byValue)
+        .filter((value) => value && value !== "package")
+        .sort((a, b) => b.length - a.length)
+        .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      const emojiPattern = emojiValues.length ? new RegExp(emojiValues.join("|"), "g") : null;
+
+      function resolve(value) {
+        const raw = String(value || "").trim();
+        const normalized = raw.replace(/\uFE0F/g, "");
+        return byValue[raw] || byValue[normalized] || byKey.package;
+      }
+
+      function createImage(value, options = {}) {
+        const asset = resolve(value);
+        const img = document.createElement("img");
+        img.src = asset.url;
+        img.alt = options.alt || asset.alt || asset.label;
+        img.className = options.className || "emoji-icon";
+        img.setAttribute("loading", "lazy");
+        img.setAttribute("decoding", "async");
+        return img;
+      }
+
+      function createInline(value, text, options = {}) {
+        const wrapper = document.createElement("span");
+        wrapper.className = options.wrapperClass || "emoji-with-text";
+        wrapper.appendChild(createImage(value, { alt: options.alt, className: options.className || "emoji-icon emoji-inline" }));
+        if (text) {
+          const label = document.createElement("span");
+          label.className = options.textClass || "emoji-text";
+          label.textContent = text;
+          wrapper.appendChild(label);
+        }
+        return wrapper;
+      }
+
+      function setInline(target, value, text, options = {}) {
+        if (!target) return;
+        target.textContent = "";
+        target.appendChild(createInline(value, text, options));
+      }
+
+      function replaceText(text, options = {}) {
+        const fragment = document.createDocumentFragment();
+        const input = String(text || "");
+        if (!emojiPattern) {
+          fragment.appendChild(document.createTextNode(input));
+          return fragment;
+        }
+
+        let lastIndex = 0;
+        input.replace(emojiPattern, (match, offset) => {
+          if (offset > lastIndex) {
+            fragment.appendChild(document.createTextNode(input.slice(lastIndex, offset)));
+          }
+          fragment.appendChild(createImage(match, { className: options.className || "emoji-icon emoji-inline" }));
+          lastIndex = offset + match.length;
+          return match;
+        });
+
+        if (lastIndex < input.length) {
+          fragment.appendChild(document.createTextNode(input.slice(lastIndex)));
+        }
+        return fragment;
+      }
+
+      function setText(target, text, options = {}) {
+        if (!target) return;
+        target.textContent = "";
+        target.appendChild(replaceText(text, options));
+      }
+
+      return {
+        assets,
+        resolve,
+        createImage,
+        createInline,
+        setInline,
+        replaceText,
+        setText,
+      };
+    })();
+  </script>
 </head>
 <body class="route-{{ (request.endpoint or 'unknown')|replace('.', '-') }}{% if low_resource_mode %} performance-low{% endif %}" data-app-zoom="{{ app_zoom_scale }}">
   <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
@@ -29,6 +129,7 @@
         <nav class="top-actions" aria-label="Acciones de sesión">
           <span class="status-pill status-pill-user">Usuario conectado: {{ session.get("user") }}</span>
           <a class="link link-danger" href="{{ url_for('logout') }}">Cerrar sesion</a>
+          <button class="link link-exit" type="button" id="exitAppButton">SALIR</button>
         </nav>
       </div>
       {% endif %}
@@ -64,6 +165,55 @@
     });
 
     (() => {
+      const params = new URLSearchParams(window.location.search || "");
+      if (params.get("launcher") === "1") {
+        sessionStorage.setItem("buen-yantar:launched-by-launcher", "1");
+      }
+
+      const exitButton = document.getElementById("exitAppButton");
+      if (!exitButton) return;
+      const launchedByLauncher = () => sessionStorage.getItem("buen-yantar:launched-by-launcher") === "1";
+
+      exitButton.addEventListener("click", async () => {
+        const confirmed = window.confirm("¿Quieres cerrar Buen Yantar?");
+        if (!confirmed) return;
+
+        if (!launchedByLauncher()) {
+          window.alert("Esta ventana no fue abierta por el lanzador. Puedes cerrar la pestaña manualmente.");
+          return;
+        }
+
+        try {
+          const response = await fetch("{{ url_for('launcher_exit') }}", {
+            method: "POST",
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+            },
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || "No se pudo cerrar la ventana abierta por el lanzador.");
+          }
+        } catch (error) {
+          window.alert(error.message || "No se pudo cerrar la ventana abierta por el lanzador.");
+          return;
+        }
+
+        window.setTimeout(() => {
+          if (!document.hidden) {
+            window.close();
+          }
+        }, 120);
+
+        window.setTimeout(() => {
+          if (!document.hidden) {
+            window.alert("No se pudo cerrar automáticamente la ventana abierta por el lanzador. Puedes cerrarla manualmente.");
+          }
+        }, 600);
+      });
+    })();
+
+    (() => {
       const toastKey = "buen-yantar:toast";
       const raw = sessionStorage.getItem(toastKey);
       if (!raw) return;
@@ -84,13 +234,13 @@
 
       const textWrap = document.createElement("div");
       const message = document.createElement("strong");
-      message.textContent = payload.message || "Operacion completada.";
+      window.BYEmoji.setText(message, payload.message || "Operacion completada.");
       textWrap.appendChild(message);
 
       if (payload.detail) {
         const detail = document.createElement("div");
         detail.className = "floating-flash-detail";
-        detail.textContent = payload.detail;
+        window.BYEmoji.setText(detail, payload.detail);
         textWrap.appendChild(detail);
       }
 

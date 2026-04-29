@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Factura">
+  <path d="M18 10h28v44l-4-3-4 3-4-3-4 3-4-3-4 3V10z" fill="#fffdf8" stroke="#d9d5c8" stroke-width="3"/>
+  <path d="M24 22h16M24 29h16M24 36h10" stroke="#2b6cb0" stroke-width="3" stroke-linecap="round"/>
+  <rect x="22" y="14" width="20" height="5" rx="2.5" fill="#f6c04a"/>
+</svg>

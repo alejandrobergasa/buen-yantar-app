@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pescado">
+  <path d="M14 32c5-10 15-16 28-16 2 4 6 7 12 8-4 3-6 5-6 8s2 5 6 8c-6 1-10 4-12 8-13 0-23-6-28-16z" fill="#5ba8d1"/>
+  <path d="M20 32c4-5 10-8 18-8" stroke="#8ed2f0" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="41" cy="28" r="2.8" fill="#1e4053"/>
+  <path d="M14 32l-6-8v16z" fill="#4b90b6"/>
+</svg>

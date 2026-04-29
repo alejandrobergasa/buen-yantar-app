@@ -4,6 +4,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from datetime import date, datetime, timedelta
 import csv
 import io
+import json
 import math
 import os
 import unicodedata
@@ -39,8 +40,10 @@ from services.groups import (
     create_group,
     delete_group,
     ensure_group_catalog,
+    find_group_by_id,
     find_group_by_name,
     list_groups,
+    update_group,
 )
 from services.auth import (
     ensure_default_admin,
@@ -79,6 +82,7 @@ from services.invoices import (
 from services.receipt_printer import format_invoice_ticket, format_shopping_list_ticket, print_text_ticket
 from services.excel_export import build_cash_annual_workbook, build_cash_detail_workbook
 from services.pdf_export import build_markdown_pdf
+from services.emoji_assets import EMOJI_PICKER_KEYS, emoji_asset_records, get_emoji_entry, get_emoji_key, render_emoji_html, replace_emoji_text
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -112,6 +116,35 @@ def create_app() -> Flask:
     ensure_default_admin(config.CSV_USUARIOS)
     if os.getenv("LOAD_DEMO_DATA", "0") == "1":
         ensure_demo_products(config.CSV_PRODUCTOS)
+
+    def emoji_url(filename: str) -> str:
+        return url_for("static", filename=f"assets/emojis/{filename}")
+
+    @app.context_processor
+    def inject_emoji_helpers():
+        assets = emoji_asset_records(emoji_url)
+        assets_by_key = {str(asset["key"]): asset for asset in assets}
+        picker_assets = [
+            assets_by_key[key]
+            for key in EMOJI_PICKER_KEYS
+            if key in assets_by_key
+        ]
+        return {
+            "emoji_icon": lambda value, alt=None, class_name="": render_emoji_html(
+                value,
+                url_builder=emoji_url,
+                alt=alt,
+                class_name=class_name,
+            ),
+            "emoji_text": lambda value, class_name="emoji-inline": replace_emoji_text(
+                value,
+                url_builder=emoji_url,
+                class_name=class_name,
+            ),
+            "emoji_entry": get_emoji_entry,
+            "emoji_picker_assets": picker_assets,
+            "emoji_assets_json": json.dumps(assets, ensure_ascii=False),
+        }
 
     def refresh_cash_analysis_storage(force: bool = False) -> dict[str, object]:
         source_paths = (
@@ -174,6 +207,21 @@ def create_app() -> Flask:
         if not user_is_admin():
             return jsonify({"ok": False, "error": message}), 403
         return None
+
+    def require_login_json(message: str = "Sesion no valida."):
+        r = require_login()
+        if r:
+            return jsonify({"ok": False, "error": message}), 401
+        return None
+
+    def launcher_exit_signal_path() -> Path | None:
+        raw = os.getenv("LAUNCHER_EXIT_SIGNAL", "").strip()
+        if not raw:
+            return None
+        try:
+            return Path(raw)
+        except (TypeError, ValueError):
+            return None
 
     @app.before_request
     def inject_user_context():
@@ -244,6 +292,20 @@ def create_app() -> Flask:
                 **{key: value for key, value in current_filters.items() if value},
             ),
         }
+
+    def is_partial_json_request() -> bool:
+        return (
+            request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            and (request.args.get("format") or "").strip().lower() == "json"
+        )
+
+    def product_browser_summary(browser: dict[str, object], empty_message: str, item_label: str = "productos") -> str:
+        total = int(browser.get("total") or 0)
+        if total <= 0:
+            return empty_message
+        shown_from = int(browser.get("shown_from") or 0)
+        shown_to = int(browser.get("shown_to") or 0)
+        return f"Mostrando {shown_from}-{shown_to} de {total} {item_label}."
 
     def parse_decimal(raw: str) -> float:
         t = (raw or "").strip().replace(" ", "")
@@ -371,7 +433,7 @@ def create_app() -> Flask:
         return [
             (
                 (row.get("nombre") or "Otros").strip() or "Otros",
-                (row.get("emoji") or "📦").strip() or "📦",
+                (row.get("emoji") or "package").strip() or "package",
             )
             for row in list_groups(config.CSV_GRUPOS)
         ]
@@ -1551,6 +1613,7 @@ def create_app() -> Flask:
                             "actualizar_saldo_caja",
                             "actualizar_zoom_app",
                             "crear_grupo_config",
+                            "editar_grupo_config",
                             "reasignar_grupo_config",
                             "eliminar_grupo_config",
                             "ejecutar_migracion_legacy",
@@ -1797,10 +1860,63 @@ def create_app() -> Flask:
         create_group(
             config.CSV_GRUPOS,
             group_name=group_name,
-            emoji=emoji or "📦",
+            emoji=emoji or "package",
             backup_dir=config.BACKUP_DIR,
         )
         flash("Grupo guardado ✅")
+        return redirect_to_config("grupos")
+
+    @app.post("/configuracion/grupos/editar")
+    def editar_grupo_config():
+        r = require_admin()
+        if r:
+            return r
+
+        group_id = (request.form.get("group_id") or "").strip()
+        group_name = (request.form.get("nombre") or "").strip()
+        emoji = (request.form.get("emoji") or "").strip()
+        if not group_id or not group_name:
+            flash("Debes indicar un grupo valido.")
+            return redirect_to_config("grupos")
+
+        current_group = find_group_by_id(config.CSV_GRUPOS, group_id)
+        if not current_group:
+            flash("El grupo que intentas editar ya no existe.")
+            return redirect_to_config("grupos")
+
+        previous_name = (current_group.get("nombre") or "Otros").strip() or "Otros"
+        updated_group = update_group(
+            config.CSV_GRUPOS,
+            group_id=group_id,
+            group_name=group_name,
+            emoji=emoji or "package",
+            backup_dir=config.BACKUP_DIR,
+        )
+        if not updated_group:
+            flash("No se pudo actualizar el grupo. Revisa si ya existe otro con ese nombre.")
+            return redirect_to_config("grupos")
+
+        new_name = (updated_group.get("nombre") or "Otros").strip() or "Otros"
+        new_emoji = (updated_group.get("emoji") or "package").strip() or "package"
+        new_emoji_char = str(get_emoji_entry(new_emoji)["char"])
+        product_updates: dict[str, dict[str, str]] = {}
+        for product in get_products(config.CSV_PRODUCTOS):
+            current_name = (product.get("grupo") or "Otros").strip() or "Otros"
+            if current_name != previous_name:
+                continue
+            updates = {"grupo_emoji": new_emoji_char}
+            if current_name != new_name:
+                updates["grupo"] = new_name
+            product_updates[product["producto_id"]] = updates
+
+        if product_updates:
+            update_many_product_fields(
+                config.CSV_PRODUCTOS,
+                backup_dir=config.BACKUP_DIR,
+                updates=product_updates,
+            )
+
+        flash("Grupo actualizado ✅")
         return redirect_to_config("grupos")
 
     @app.post("/configuracion/grupos/reasignar")
@@ -1833,7 +1949,7 @@ def create_app() -> Flask:
             changed += 1
             product_updates[product["producto_id"]] = {
                 "grupo": target_group,
-                "grupo_emoji": (target_group_row.get("emoji") or "📦").strip() or "📦",
+                "grupo_emoji": str(get_emoji_entry((target_group_row.get("emoji") or "package").strip() or "package")["char"]),
             }
 
         if not product_updates:
@@ -2053,6 +2169,23 @@ def create_app() -> Flask:
     def root():
         return redirect(url_for("home"))
 
+    @app.post("/launcher/exit")
+    def launcher_exit():
+        r = require_login_json()
+        if r:
+            return r
+
+        signal_path = launcher_exit_signal_path()
+        if signal_path is None:
+            return jsonify({
+                "ok": False,
+                "error": "Esta ventana no fue abierta por el lanzador. Puedes cerrarla manualmente.",
+            }), 409
+
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+        signal_path.write_text("close", encoding="utf-8")
+        return jsonify({"ok": True})
+
     @app.get("/home")
     def home():
         r = require_login()
@@ -2077,6 +2210,7 @@ def create_app() -> Flask:
             product_summary = {
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
+                "grupo": (p.get("grupo") or "Otros").strip() or "Otros",
                 "grupo_emoji": p.get("grupo_emoji", "📦"),
                 "stock_label": format_compact_number(current_stock),
                 "stock_minimo_label": format_compact_number(stock_min),
@@ -2166,7 +2300,7 @@ def create_app() -> Flask:
             cash_state=get_cashbox_state(config.CSV_CAJA) if is_admin_user else None,
             recent_activity=recent_activity[:6],
             attention_products=attention_products,
-            shopping_products=shopping_products if is_admin_user else [],
+            shopping_products=shopping_products,
         )
 
     @app.get("/analisis")
@@ -2321,7 +2455,7 @@ def create_app() -> Flask:
 
     @app.post("/listas/compra/imprimir")
     def imprimir_lista_compra():
-        r = require_admin_json()
+        r = require_login_json()
         if r:
             return r
 
@@ -2425,6 +2559,8 @@ def create_app() -> Flask:
                 "stock_display_main": stock_display_main,
                 "stock_display_meta": stock_display_meta,
                 "bajo_minimo": "1" if bajo_min else "0",
+                "state_label": "INF" if infinito else ("0" if stock == 0 else ("BAJO" if bajo_min else "OK")),
+                "state_class": "state-inf" if infinito else ("state-zero" if stock == 0 else ("state-low" if bajo_min else "state-ok")),
             })
         rows.sort(key=lambda x: x["nombre"].lower())
         group_options = group_options_for_products(prods)
@@ -2467,6 +2603,30 @@ def create_app() -> Flask:
                     },
                 ),
             }
+
+        if is_partial_json_request():
+            payload_rows = []
+            for row in visible_rows:
+                payload_row = dict(row)
+                payload_row["href"] = url_for(
+                    "inventario",
+                    producto_id=row.get("producto_id"),
+                    q=current_filters["q"] or None,
+                    g=current_filters["g"] or None,
+                    low="1" if current_filters["low"] == "1" else None,
+                    page=product_browser["page"] if config.LOW_RESOURCE_MODE and product_browser["page"] > 1 else None,
+                )
+                payload_rows.append(payload_row)
+            return jsonify({
+                "ok": True,
+                "items": payload_rows,
+                "browser": product_browser,
+                "summary": product_browser_summary(
+                    product_browser,
+                    "No hay productos que coincidan con los filtros actuales.",
+                ),
+                "selected_producto_id": producto_id,
+            })
 
         selected = find_product(config.CSV_PRODUCTOS, producto_id) if producto_id else None
 
@@ -2557,22 +2717,24 @@ def create_app() -> Flask:
         )
         groups_map = {
             (row.get("nombre") or "Otros").strip() or "Otros":
-            (row.get("emoji") or "📦").strip() or "📦"
+            str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
             for row in list_groups(config.CSV_GRUPOS)
         }
 
         if grupo_select == "__new__":
             grupo = (request.form.get("grupo_custom") or "").strip()
-            grupo_emoji = (request.form.get("grupo_emoji_custom") or "").strip()
+            grupo_emoji_value = (request.form.get("grupo_emoji_custom") or "").strip()
             if not grupo:
                 flash("Si eliges 'Nuevo grupo', debes indicar el nombre del grupo.")
                 return inventario_redirect_with_filters()
-            if not grupo_emoji:
+            if not grupo_emoji_value:
                 flash("Si eliges 'Nuevo grupo', debes indicar el emoji del grupo.")
                 return inventario_redirect_with_filters()
+            grupo_emoji_key = get_emoji_key(grupo_emoji_value)
+            grupo_emoji = str(get_emoji_entry(grupo_emoji_key)["char"])
         else:
             grupo = grupo_select or "Otros"
-            grupo_emoji = groups_map.get(grupo, "📦")
+            grupo_emoji = groups_map.get(grupo, str(get_emoji_entry("package")["char"]))
 
         if not nombre:
             flash("El nombre del producto es obligatorio.")
@@ -2623,7 +2785,7 @@ def create_app() -> Flask:
         create_group(
             config.CSV_GRUPOS,
             group_name=grupo,
-            emoji=grupo_emoji,
+            emoji=grupo_emoji_key if grupo_select == "__new__" else get_emoji_key(grupo_emoji),
             backup_dir=config.BACKUP_DIR,
         )
         if stock_actual_value is not None:
@@ -2652,8 +2814,40 @@ def create_app() -> Flask:
         fracciones_por_unidad_raw = (request.form.get("fracciones_por_unidad", "1") or "1").strip()
         unidad_venta_raw = (request.form.get("unidad_venta", "") or "").strip()
 
-        grupo = request.form.get("grupo", "Otros").strip() or "Otros"
-        grupo_emoji = request.form.get("grupo_emoji", "📦").strip() or "📦"
+        grupo_select = (request.form.get("grupo_select") or "").strip()
+        legacy_grupo = (request.form.get("grupo") or "").strip()
+        legacy_grupo_emoji = (request.form.get("grupo_emoji") or "").strip()
+
+        prods = get_products(config.CSV_PRODUCTOS)
+        ensure_group_catalog(
+            config.CSV_GRUPOS,
+            products=prods,
+            backup_dir=config.BACKUP_DIR,
+        )
+        groups_map = {
+            (row.get("nombre") or "Otros").strip() or "Otros":
+            str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
+            for row in list_groups(config.CSV_GRUPOS)
+        }
+
+        if grupo_select == "__new__":
+            grupo = (request.form.get("grupo_custom") or "").strip()
+            grupo_emoji_value = (request.form.get("grupo_emoji_custom") or "").strip()
+            if not grupo:
+                flash("Si eliges 'Nuevo grupo', debes indicar el nombre del grupo.")
+                return inventario_redirect_with_filters(producto_id=producto_id)
+            if not grupo_emoji_value:
+                flash("Si eliges 'Nuevo grupo', debes indicar el emoji del grupo.")
+                return inventario_redirect_with_filters(producto_id=producto_id)
+            grupo_emoji_key = get_emoji_key(grupo_emoji_value)
+            grupo_emoji = str(get_emoji_entry(grupo_emoji_key)["char"])
+        else:
+            grupo = grupo_select or legacy_grupo or "Otros"
+            grupo_emoji = groups_map.get(
+                grupo,
+                str(get_emoji_entry(get_emoji_key(legacy_grupo_emoji or "package"))["char"]),
+            )
+            grupo_emoji_key = get_emoji_key(grupo_emoji)
 
         stock_infinito = "1" if request.form.get("stock_infinito") == "on" else "0"
         if fraccionable == "1":
@@ -2706,7 +2900,7 @@ def create_app() -> Flask:
         create_group(
             config.CSV_GRUPOS,
             group_name=grupo,
-            emoji=grupo_emoji,
+            emoji=grupo_emoji_key,
             backup_dir=config.BACKUP_DIR,
         )
         if stock_actual_value is not None:
@@ -2799,6 +2993,17 @@ def create_app() -> Flask:
         else:
             visible_product_options = filtered_product_options
             product_browser = simple_browser_state("nueva_factura", current_filters, len(filtered_product_options))
+
+        if is_partial_json_request():
+            return jsonify({
+                "ok": True,
+                "items": visible_product_options,
+                "browser": product_browser,
+                "summary": product_browser_summary(
+                    product_browser,
+                    "No hay productos que coincidan con el filtro.",
+                ),
+            })
 
         return render_template(
             "factura_nueva.html",
@@ -2935,7 +3140,7 @@ def create_app() -> Flask:
             })
 
         flash(success_message)
-        return redirect_with_list_filters("nueva_factura")
+        return redirect(url_for("home"))
 
     @app.get("/facturas/historial")
     def historial_facturas():
@@ -3405,6 +3610,17 @@ def create_app() -> Flask:
             visible_product_options = filtered_product_options
             product_browser = simple_browser_state("nueva_compra", current_filters, len(filtered_product_options))
 
+        if is_partial_json_request():
+            return jsonify({
+                "ok": True,
+                "items": visible_product_options,
+                "browser": product_browser,
+                "summary": product_browser_summary(
+                    product_browser,
+                    "No hay productos que coincidan con el filtro.",
+                ),
+            })
+
         return render_template(
             "compra_nueva.html",
             title="Nueva compra",
@@ -3561,7 +3777,7 @@ def create_app() -> Flask:
                 "message": success_message,
             })
         flash(success_message)
-        return redirect_with_list_filters("nueva_compra")
+        return redirect(url_for("home"))
 
     @app.get("/gastos/nuevo")
     def nuevo_gasto_libre():

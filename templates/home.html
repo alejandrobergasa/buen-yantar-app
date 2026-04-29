@@ -13,24 +13,24 @@
         <h3 class="home-group-title">Operativa</h3>
         <div class="action-grid home-action-grid">
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nueva_factura') }}">
-            <span class="home-menu-emoji" aria-hidden="true">🧾</span>
+            {{ emoji_icon("receipt", alt="Nueva factura", class_name="home-menu-emoji") }}
             <h2>Nueva factura</h2>
           </a>
 
           {% if g.is_admin %}
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nueva_compra') }}">
-            <span class="home-menu-emoji" aria-hidden="true">🛒</span>
+            {{ emoji_icon("cart", alt="Nueva compra", class_name="home-menu-emoji") }}
             <h2>Nueva compra</h2>
           </a>
 
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('nuevo_gasto_libre') }}">
-            <span class="home-menu-emoji" aria-hidden="true">💸</span>
+            {{ emoji_icon("cash", alt="Gasto libre", class_name="home-menu-emoji") }}
             <h2>Gasto libre</h2>
           </a>
           {% endif %}
 
           <a class="action-card action-card-primary home-menu-card" href="{{ url_for('inventario') }}">
-            <span class="home-menu-emoji" aria-hidden="true">📦</span>
+            {{ emoji_icon("package", alt="Inventario", class_name="home-menu-emoji") }}
             <h2>Inventario</h2>
           </a>
         </div>
@@ -40,25 +40,25 @@
         <h3 class="home-group-title">Consulta</h3>
         <div class="action-grid home-action-grid home-action-grid-secondary">
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_facturas') }}">
-            <span class="home-menu-emoji" aria-hidden="true">📄</span>
+            {{ emoji_icon("document", alt="Historial facturas", class_name="home-menu-emoji") }}
             <h2>Historial Facturas</h2>
           </a>
 
           {% if g.is_admin %}
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_compras') }}">
-            <span class="home-menu-emoji" aria-hidden="true">🛍️</span>
+            {{ emoji_icon("bags", alt="Historial compras", class_name="home-menu-emoji") }}
             <h2>Historial Compras</h2>
           </a>
 
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('historial_gastos_libres') }}">
-            <span class="home-menu-emoji" aria-hidden="true">💳</span>
+            {{ emoji_icon("card", alt="Historial gastos", class_name="home-menu-emoji") }}
             <h2>Historial Gastos</h2>
           </a>
           {% endif %}
 
           {% if not g.is_admin %}
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('gestion_usuarios') }}">
-            <span class="home-menu-emoji" aria-hidden="true">👤</span>
+            {{ emoji_icon("user", alt="Usuario", class_name="home-menu-emoji") }}
             <h2>Usuario</h2>
           </a>
           {% endif %}
@@ -70,12 +70,12 @@
         <h3 class="home-group-title">Administracion</h3>
         <div class="action-grid home-action-grid home-action-grid-admin">
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('configuracion_caja') }}">
-            <span class="home-menu-emoji" aria-hidden="true">⚙️</span>
+            {{ emoji_icon("settings", alt="Configuración", class_name="home-menu-emoji") }}
             <h2>Configuracion</h2>
           </a>
 
           <a class="action-card action-card-short home-menu-card" href="{{ url_for('analisis') }}">
-            <span class="home-menu-emoji" aria-hidden="true">📈</span>
+            {{ emoji_icon("chart", alt="Análisis", class_name="home-menu-emoji") }}
             <h2>Analisis</h2>
           </a>
         </div>
@@ -115,7 +115,7 @@
       <div class="home-compact-list home-scroll-list">
         {% for item in attention_products %}
         <a class="home-compact-item" href="{{ item.href }}">
-          <strong class="home-compact-title">{{ item.grupo_emoji }} {{ item.nombre }}</strong>
+          <strong class="home-compact-title">{{ emoji_icon(item.grupo_emoji, alt=item.nombre, class_name="emoji-inline") }}<span>{{ item.nombre }}</span></strong>
           <div class="home-compact-inline-meta">{{ item.stock_label }} ({{ item.stock_minimo_label }})</div>
         </a>
         {% endfor %}
@@ -124,19 +124,16 @@
       <div class="empty">No hay alertas de stock bajo.</div>
       {% endif %}
 
-      {% if g.is_admin %}
       <div class="home-side-panel-actions">
         <button class="btn btn-primary btn-small" type="button" id="openShoppingListDialog">
           Generar lista de la compra
         </button>
       </div>
-      {% endif %}
     </section>
 
   </aside>
 </div>
 
-{% if g.is_admin %}
 <dialog class="shopping-dialog" id="shoppingListDialog">
   <div class="shopping-dialog-shell">
     <div class="shopping-dialog-header">
@@ -152,6 +149,27 @@
           <h3 class="home-group-title">Inventario</h3>
           <span class="header-count" id="shoppingInventoryCount">0</span>
         </div>
+        <form class="inv-filters shopping-filter-form" id="shoppingFiltersForm">
+          <div>
+            <label class="label" for="shoppingSearch">Buscar producto</label>
+            <input class="input" id="shoppingSearch" type="search" placeholder="Nombre del producto">
+          </div>
+          <div>
+            <label class="label" for="shoppingGroup">Grupo</label>
+            <select id="shoppingGroup">
+              <option value="">(Todos)</option>
+            </select>
+          </div>
+          <div class="shopping-filter-toggle">
+            <label class="check">
+              <input type="checkbox" id="shoppingLowOnly">
+              <span>Solo stock bajo</span>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="btn btn-secondary btn-small" type="button" id="shoppingClearFilters">Limpiar</button>
+          </div>
+        </form>
         <div class="shopping-dialog-list" id="shoppingInventoryList"></div>
       </section>
 
@@ -184,6 +202,11 @@
     const inventoryCount = document.getElementById("shoppingInventoryCount");
     const selectedCount = document.getElementById("shoppingSelectedCount");
     const printButton = document.getElementById("printShoppingListButton");
+    const filtersForm = document.getElementById("shoppingFiltersForm");
+    const searchInput = document.getElementById("shoppingSearch");
+    const groupFilter = document.getElementById("shoppingGroup");
+    const lowOnlyFilter = document.getElementById("shoppingLowOnly");
+    const clearFiltersButton = document.getElementById("shoppingClearFilters");
 
     if (!dialog || !openButton || !inventoryList || !selectedList || !printButton) {
       return;
@@ -193,23 +216,72 @@
       products.filter((product) => product.low_stock).map((product) => product.producto_id)
     );
 
+    function debounce(fn, delay = 120) {
+      let timer = null;
+      return (...args) => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    function currentFilters() {
+      return {
+        q: (searchInput?.value || "").trim().toLowerCase(),
+        group: (groupFilter?.value || "").trim(),
+        lowOnly: !!lowOnlyFilter?.checked,
+      };
+    }
+
+    function filteredProducts() {
+      const filters = currentFilters();
+      return products.filter((product) => {
+        if (filters.q && !(product.nombre || "").toLowerCase().includes(filters.q)) {
+          return false;
+        }
+        if (filters.group && (product.grupo || "") !== filters.group) {
+          return false;
+        }
+        if (filters.lowOnly && !product.low_stock) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function populateGroupFilter() {
+      if (!groupFilter) return;
+      const groups = Array.from(new Set(
+        products
+          .map((product) => (product.grupo || "").trim())
+          .filter(Boolean)
+      )).sort((a, b) => a.localeCompare(b, "es"));
+
+      groups.forEach((group) => {
+        const option = document.createElement("option");
+        option.value = group;
+        option.textContent = group;
+        groupFilter.appendChild(option);
+      });
+    }
+
     function selectedProducts() {
       return products.filter((product) => selectedIds.has(product.producto_id));
     }
 
     function renderInventoryList() {
+      const visibleProducts = filteredProducts();
       inventoryList.replaceChildren();
-      inventoryCount.textContent = String(products.length);
+      inventoryCount.textContent = String(visibleProducts.length);
 
-      if (!products.length) {
+      if (!visibleProducts.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No hay productos disponibles.";
+        empty.textContent = "No hay productos que coincidan con los filtros.";
         inventoryList.appendChild(empty);
         return;
       }
 
-      products.forEach((product) => {
+      visibleProducts.forEach((product) => {
         const row = document.createElement("label");
         row.className = `shopping-row${product.low_stock ? " shopping-row-low" : ""}`;
 
@@ -232,7 +304,9 @@
 
         const title = document.createElement("strong");
         title.className = "shopping-row-title";
-        title.textContent = `${product.grupo_emoji} ${product.nombre}`;
+        window.BYEmoji.setInline(title, product.grupo_emoji, product.nombre, {
+          className: "emoji-icon emoji-inline",
+        });
 
         const meta = document.createElement("span");
         meta.className = "shopping-row-meta";
@@ -267,7 +341,9 @@
 
         const title = document.createElement("strong");
         title.className = "shopping-selected-title";
-        title.textContent = `${product.grupo_emoji} ${product.nombre}`;
+        window.BYEmoji.setInline(title, product.grupo_emoji, product.nombre, {
+          className: "emoji-icon emoji-inline",
+        });
 
         const meta = document.createElement("span");
         meta.className = "shopping-selected-meta";
@@ -331,6 +407,34 @@
       dialog.showModal();
     });
 
+    if (filtersForm) {
+      filtersForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        renderInventoryList();
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", debounce(renderInventoryList, 120));
+    }
+
+    if (groupFilter) {
+      groupFilter.addEventListener("change", renderInventoryList);
+    }
+
+    if (lowOnlyFilter) {
+      lowOnlyFilter.addEventListener("change", renderInventoryList);
+    }
+
+    if (clearFiltersButton) {
+      clearFiltersButton.addEventListener("click", () => {
+        if (searchInput) searchInput.value = "";
+        if (groupFilter) groupFilter.value = "";
+        if (lowOnlyFilter) lowOnlyFilter.checked = false;
+        renderInventoryList();
+      });
+    }
+
     closeButtons.forEach((button) => {
       button.addEventListener("click", () => dialog.close());
     });
@@ -342,7 +446,7 @@
     });
 
     printButton.addEventListener("click", printShoppingList);
+    populateGroupFilter();
   })();
 </script>
-{% endif %}
 {% endblock %}

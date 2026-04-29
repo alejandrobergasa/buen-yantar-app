@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Etiquetas">
+  <path d="M14 30V16h16l20 20-14 14z" fill="#f1d36e"/>
+  <circle cx="24" cy="24" r="4" fill="#fff7d2"/>
+  <path d="M14 30l22 22" stroke="#c7a94b" stroke-width="4"/>
+</svg>

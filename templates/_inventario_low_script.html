@@ -28,6 +28,9 @@
       createBtn.textContent = show ? "Volver al detalle" : "Nuevo producto";
       createBtn.setAttribute("aria-expanded", show ? "true" : "false");
     }
+    if (show && window.syncInventoryGroupFields) {
+      window.syncInventoryGroupFields();
+    }
   }
 
   const productsTbody = document.getElementById("productsTbody");
@@ -35,6 +38,14 @@
   const inventorySearchBox = document.getElementById("searchBox");
   const inventoryGroupFilter = document.getElementById("groupFilter");
   const inventoryOnlyLow = document.getElementById("onlyLow");
+  const inventoryNoResults = document.getElementById("inventoryNoResults");
+  const inventoryBrowserSummary = document.getElementById("inventoryBrowserSummary");
+  const inventoryBrowserActions = document.getElementById("inventoryBrowserActions");
+  const inventoryPageInfo = document.getElementById("inventoryPageInfo");
+  const inventoryClearFilters = document.getElementById("inventoryClearFilters");
+  const inventoryFilterLoading = document.getElementById("inventoryFilterLoading");
+  const listBox = document.getElementById("listBox");
+  let inventoryFetchToken = 0;
 
   function rememberFilterFocus(input) {
     if (!input || !input.id) return;
@@ -76,12 +87,160 @@
 
   restoreFilterFocus();
 
+  function currentSelectedProductId() {
+    const selectedRow = productsTbody ? productsTbody.querySelector(".row-selected") : null;
+    return selectedRow ? (selectedRow.getAttribute("data-product-id") || "") : "";
+  }
+
+  function setInventoryLoading(isLoading) {
+    if (inventoryFilterLoading) inventoryFilterLoading.hidden = !isLoading;
+  }
+
+  function buildInventoryRow(row, selectedProductId) {
+    const tr = document.createElement("tr");
+    const isSelected = !!selectedProductId && selectedProductId === row.producto_id;
+    tr.className = `row-click${isSelected ? " row-selected" : ""}`;
+    tr.setAttribute("data-href", row.href || "");
+    tr.setAttribute("data-product-id", row.producto_id || "");
+    tr.setAttribute("data-name", row.nombre || "");
+    tr.setAttribute("data-group", row.grupo || "");
+    tr.setAttribute("data-low", row.bajo_minimo || "0");
+    tr.setAttribute("data-inf", row.stock_infinito || "0");
+    tr.setAttribute("tabindex", "0");
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Abrir detalle de ${row.nombre || "producto"}`);
+
+    const productCell = document.createElement("td");
+    const head = document.createElement("div");
+    head.className = "product-row-head";
+    const name = document.createElement("span");
+    name.className = "product-name";
+    window.BYEmoji.setInline(name, row.grupo_emoji || "package", row.nombre || "", {
+      className: "emoji-icon emoji-inline",
+    });
+    const state = document.createElement("span");
+    state.className = `product-state ${row.state_class || "state-ok"}`;
+    state.textContent = row.state_label || "OK";
+    head.append(name, state);
+    productCell.appendChild(head);
+    if (row.fraccionable === "1" && row.fraccion_info) {
+      const sub = document.createElement("div");
+      sub.className = "help product-subtext";
+      sub.textContent = `Compra en ${row.unidad || "ud"} · Venta en ${row.unidad_venta || row.unidad || "ud"} · ${row.fraccion_info}`;
+      productCell.appendChild(sub);
+    }
+
+    const stockCell = document.createElement("td");
+    stockCell.className = "right";
+    if (row.stock_infinito === "1") {
+      stockCell.appendChild(window.BYEmoji.createImage("infinity", { alt: "Stock infinito", className: "emoji-icon" }));
+    } else {
+      const main = document.createElement("div");
+      main.className = "stock-display-main";
+      main.textContent = row.stock_display_main || "";
+      stockCell.appendChild(main);
+      if (row.stock_display_meta) {
+        const meta = document.createElement("div");
+        meta.className = "stock-display-meta";
+        meta.textContent = row.stock_display_meta;
+        stockCell.appendChild(meta);
+      }
+    }
+
+    tr.append(productCell, stockCell);
+    return tr;
+  }
+
+  function updateInventoryPagination(browser) {
+    if (!inventoryBrowserSummary || !inventoryBrowserActions || !inventoryPageInfo) return;
+    inventoryBrowserSummary.textContent = browser.summary || "";
+    inventoryBrowserActions.hidden = !(browser.page_count > 1);
+    inventoryBrowserActions.replaceChildren();
+    if (!(browser.page_count > 1)) return;
+
+    const prevControl = browser.has_prev ? document.createElement("a") : document.createElement("span");
+    prevControl.id = "inventoryPrevPage";
+    prevControl.className = "btn btn-secondary btn-small";
+    prevControl.textContent = "Anterior";
+    if (browser.has_prev) {
+      prevControl.href = browser.prev_url || "#";
+    } else {
+      prevControl.setAttribute("aria-disabled", "true");
+    }
+
+    inventoryPageInfo.textContent = `Página ${browser.page || 1} de ${browser.page_count || 1}`;
+
+    const nextControl = browser.has_next ? document.createElement("a") : document.createElement("span");
+    nextControl.id = "inventoryNextPage";
+    nextControl.className = "btn btn-secondary btn-small";
+    nextControl.textContent = "Siguiente";
+    if (browser.has_next) {
+      nextControl.href = browser.next_url || "#";
+    } else {
+      nextControl.setAttribute("aria-disabled", "true");
+    }
+
+    inventoryBrowserActions.append(prevControl, inventoryPageInfo, nextControl);
+  }
+
+  async function fetchInventoryProducts(targetUrl = null) {
+    if (!inventoryFiltersForm || !productsTbody) return;
+    const scrollTop = listBox ? listBox.scrollTop : 0;
+    const selectedProductId = currentSelectedProductId();
+    const url = new URL(targetUrl || inventoryFiltersForm.action, window.location.origin);
+    url.searchParams.set("q", inventorySearchBox ? inventorySearchBox.value.trim() : "");
+    url.searchParams.set("g", inventoryGroupFilter ? inventoryGroupFilter.value.trim() : "");
+    if (inventoryOnlyLow && inventoryOnlyLow.checked) {
+      url.searchParams.set("low", "1");
+    } else {
+      url.searchParams.delete("low");
+    }
+    url.searchParams.set("format", "json");
+
+    const token = ++inventoryFetchToken;
+    setInventoryLoading(true);
+    try {
+      const response = await fetch(url.toString(), {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudieron actualizar los productos.");
+      }
+      if (token !== inventoryFetchToken) return;
+
+      productsTbody.replaceChildren();
+      (payload.items || []).forEach((row) => {
+        productsTbody.appendChild(buildInventoryRow(row, selectedProductId));
+      });
+      if (inventoryNoResults) {
+        inventoryNoResults.hidden = (payload.items || []).length !== 0;
+      }
+      updateInventoryPagination({
+        ...(payload.browser || {}),
+        summary: payload.summary || "",
+      });
+      if (listBox) listBox.scrollTop = scrollTop;
+    } catch (error) {
+      console.error(error);
+    } finally {
+      if (token === inventoryFetchToken) {
+        setInventoryLoading(false);
+      }
+    }
+  }
+
   if (inventoryFiltersForm) {
-    const submitFilters = (sourceInput = null) => {
+    const submitFilters = (sourceInput = null, targetUrl = null) => {
       rememberFilterFocus(sourceInput);
-      inventoryFiltersForm.requestSubmit();
+      fetchInventoryProducts(targetUrl);
     };
     const submitFiltersDebounced = debounce((sourceInput) => submitFilters(sourceInput), 220);
+
+    inventoryFiltersForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitFilters(document.activeElement);
+    });
 
     if (inventorySearchBox) {
       inventorySearchBox.addEventListener("input", () => submitFiltersDebounced(inventorySearchBox));
@@ -91,6 +250,23 @@
     }
     if (inventoryOnlyLow) {
       inventoryOnlyLow.addEventListener("change", () => submitFilters(inventoryOnlyLow));
+    }
+    if (inventoryClearFilters) {
+      inventoryClearFilters.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (inventorySearchBox) inventorySearchBox.value = "";
+        if (inventoryGroupFilter) inventoryGroupFilter.value = "";
+        if (inventoryOnlyLow) inventoryOnlyLow.checked = false;
+        submitFilters(inventorySearchBox);
+      });
+    }
+    if (inventoryBrowserActions) {
+      inventoryBrowserActions.addEventListener("click", (event) => {
+        const link = event.target.closest("a[href]");
+        if (!link || link.getAttribute("aria-disabled") === "true") return;
+        event.preventDefault();
+        submitFilters(document.activeElement, link.href);
+      });
     }
   }
 
@@ -118,16 +294,122 @@
   if (newProdForm) {
     const grupoSelect = document.getElementById("grupoSelect");
     const newGroupFields = document.getElementById("newGroupFields");
+    const groupEmojiInput = document.getElementById("groupEmojiInput");
+    const groupEmojiTrigger = document.getElementById("groupEmojiTrigger");
+    const groupEmojiValue = document.getElementById("groupEmojiValue");
+    const groupEmojiMenu = document.getElementById("groupEmojiMenu");
+    const groupEmojiScroll = document.getElementById("groupEmojiScroll");
     const stockInfinitoCheckbox = newProdForm.querySelector('input[name="stock_infinito"]');
     const stockActualInput = newProdForm.querySelector('input[name="stock_actual"]');
     const stockUnitInput = newProdForm.querySelector('input[name="unidad"]');
     const fractionableCheckbox = newProdForm.querySelector('input[name="fraccionable"]');
     const fractionCountInput = newProdForm.querySelector('input[name="fracciones_por_unidad"]');
     const saleUnitInput = newProdForm.querySelector('input[name="unidad_venta"]');
+    const emojiChoices = window.BYEmoji.assets.filter((asset) => {
+      return ["food", "drink", "object"].includes(asset.category || "object");
+    });
+    const emojiCategoryOrder = ["food", "drink", "object"];
+    const emojiCategoryLabels = {
+      food: "Comida",
+      drink: "Bebidas",
+      object: "Objetos",
+    };
+    let emojiPickerRendered = false;
+
+    function isNewGroupSelected() {
+      return !!grupoSelect && (grupoSelect.value || "").trim() === "__new__";
+    }
 
     function syncGroupUI() {
       if (!grupoSelect || !newGroupFields) return;
-      newGroupFields.style.display = grupoSelect.value === "__new__" ? "block" : "none";
+      const isNewGroup = isNewGroupSelected();
+      newGroupFields.hidden = !isNewGroup;
+      newGroupFields.setAttribute("aria-hidden", isNewGroup ? "false" : "true");
+      newGroupFields.style.display = isNewGroup ? "" : "none";
+      if (!isNewGroup) closeEmojiPicker();
+    }
+
+    function renderEmojiPicker() {
+      if (!groupEmojiScroll) return;
+      groupEmojiScroll.innerHTML = "";
+
+      emojiCategoryOrder.forEach((category) => {
+        const items = emojiChoices.filter((asset) => (asset.category || "object") === category);
+        if (!items.length) return;
+
+        const section = document.createElement("section");
+        section.className = "emoji-group";
+
+        const title = document.createElement("div");
+        title.className = "emoji-group-title";
+        title.textContent = emojiCategoryLabels[category] || "Iconos";
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "emoji-picker-grid";
+
+        items.forEach((asset) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "emoji-option";
+          button.dataset.emoji = asset.key;
+          button.setAttribute("aria-label", `Elegir ${asset.label}`);
+          button.appendChild(window.BYEmoji.createImage(asset.key, {
+            alt: asset.label,
+            className: "emoji-icon emoji-button-icon",
+          }));
+          const label = document.createElement("span");
+          label.textContent = asset.label;
+          button.appendChild(label);
+          button.addEventListener("click", () => {
+            if (groupEmojiInput) groupEmojiInput.value = asset.key;
+            updateEmojiPickerUI();
+            closeEmojiPicker();
+          });
+          grid.appendChild(button);
+        });
+
+        section.appendChild(grid);
+        groupEmojiScroll.appendChild(section);
+      });
+    }
+
+    function ensureEmojiPickerRendered() {
+      if (emojiPickerRendered) return;
+      renderEmojiPicker();
+      updateEmojiPickerUI();
+      emojiPickerRendered = true;
+    }
+
+    function updateEmojiPickerUI() {
+      const value = (groupEmojiInput && groupEmojiInput.value || "").trim();
+      if (groupEmojiValue) {
+        if (value) {
+          const asset = window.BYEmoji.resolve(value);
+          groupEmojiValue.textContent = "";
+          groupEmojiValue.appendChild(window.BYEmoji.createInline(value, asset.label, {
+            className: "emoji-icon emoji-inline",
+          }));
+        } else {
+          groupEmojiValue.textContent = "Selecciona un icono";
+        }
+      }
+      document.querySelectorAll(".emoji-option").forEach((button) => {
+        button.classList.toggle("emoji-option-selected", button.dataset.emoji === value);
+      });
+    }
+
+    function openEmojiPicker() {
+      if (!groupEmojiMenu || !groupEmojiTrigger) return;
+      ensureEmojiPickerRendered();
+      groupEmojiMenu.hidden = false;
+      groupEmojiTrigger.setAttribute("aria-expanded", "true");
+    }
+
+    function closeEmojiPicker() {
+      if (!groupEmojiMenu || !groupEmojiTrigger) return;
+      groupEmojiMenu.hidden = true;
+      groupEmojiTrigger.setAttribute("aria-expanded", "false");
     }
 
     function syncStockActualUI() {
@@ -153,7 +435,14 @@
       }
     }
 
+    window.syncInventoryGroupFields = syncGroupUI;
     if (grupoSelect) grupoSelect.addEventListener("change", syncGroupUI);
+    if (groupEmojiTrigger) {
+      groupEmojiTrigger.addEventListener("click", () => {
+        if (!groupEmojiMenu || groupEmojiMenu.hidden) openEmojiPicker();
+        else closeEmojiPicker();
+      });
+    }
     if (stockInfinitoCheckbox) stockInfinitoCheckbox.addEventListener("change", syncStockActualUI);
     if (fractionableCheckbox) fractionableCheckbox.addEventListener("change", syncFractionalUI);
     if (stockUnitInput) {
@@ -164,8 +453,15 @@
     }
 
     syncGroupUI();
+    updateEmojiPickerUI();
     syncStockActualUI();
     syncFractionalUI();
+
+    document.addEventListener("click", (event) => {
+      const picker = document.getElementById("groupEmojiPicker");
+      if (!picker || picker.contains(event.target)) return;
+      closeEmojiPicker();
+    });
 
     newProdForm.addEventListener("submit", () => {
       ["precio_unitario", "stock_minimo", "stock_actual", "fracciones_por_unidad"].forEach((name) => {
@@ -196,10 +492,29 @@
     const fractionableDetail = detailForm.querySelector(".js-fractionable-detail");
     const fractionCountDetail = detailForm.querySelector(".js-fraction-count-detail");
     const saleUnitDetail = detailForm.querySelector(".js-sale-unit-detail");
+    const groupSelectDetail = detailForm.querySelector(".js-detail-group-select");
+    const editNewGroupFields = document.getElementById("editNewGroupFields");
+    const editNewGroupInputs = Array.from(detailForm.querySelectorAll(".js-edit-new-group-field"));
+    const editGroupNameInput = document.getElementById("editGroupNameInput");
+    const editGroupEmojiInput = document.getElementById("editGroupEmojiInput");
+    const editGroupEmojiTrigger = document.getElementById("editGroupEmojiTrigger");
+    const editGroupEmojiValue = document.getElementById("editGroupEmojiValue");
+    const editGroupEmojiMenu = document.getElementById("editGroupEmojiMenu");
+    const editGroupEmojiScroll = document.getElementById("editGroupEmojiScroll");
     const btnEditDetail = document.getElementById("btnEditDetail");
     const btnCancelDetail = document.getElementById("btnCancelDetail");
     const actionsView = document.getElementById("detailActionsView");
     const actionsEdit = document.getElementById("detailActionsEdit");
+    const editEmojiChoices = window.BYEmoji.assets.filter((asset) => {
+      return ["food", "drink", "object"].includes(asset.category || "object");
+    });
+    const editEmojiCategoryOrder = ["food", "drink", "object"];
+    const editEmojiCategoryLabels = {
+      food: "Comida",
+      drink: "Bebidas",
+      object: "Objetos",
+    };
+    let editEmojiPickerRendered = false;
 
     const initialState = {};
     editableFields.forEach((el) => {
@@ -244,15 +559,119 @@
       }
     }
 
+    function isDetailNewGroupSelected() {
+      return !!groupSelectDetail && (groupSelectDetail.value || "").trim() === "__new__";
+    }
+
+    function syncDetailGroupFields() {
+      if (!groupSelectDetail || !editNewGroupFields) return;
+      const editing = isEditing();
+      const isNewGroup = editing && isDetailNewGroupSelected();
+      editNewGroupFields.hidden = !isNewGroup;
+      editNewGroupFields.setAttribute("aria-hidden", isNewGroup ? "false" : "true");
+      editNewGroupFields.style.display = isNewGroup ? "" : "none";
+      editNewGroupInputs.forEach((input) => {
+        input.disabled = !isNewGroup;
+      });
+      if (!isNewGroup) closeEditEmojiPicker();
+    }
+
+    function renderEditEmojiPicker() {
+      if (!editGroupEmojiScroll) return;
+      editGroupEmojiScroll.innerHTML = "";
+
+      editEmojiCategoryOrder.forEach((category) => {
+        const items = editEmojiChoices.filter((asset) => (asset.category || "object") === category);
+        if (!items.length) return;
+
+        const section = document.createElement("section");
+        section.className = "emoji-group";
+
+        const title = document.createElement("div");
+        title.className = "emoji-group-title";
+        title.textContent = editEmojiCategoryLabels[category] || "Iconos";
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "emoji-picker-grid";
+
+        items.forEach((asset) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "emoji-option";
+          button.dataset.emoji = asset.key;
+          button.setAttribute("aria-label", `Elegir ${asset.label}`);
+          button.appendChild(window.BYEmoji.createImage(asset.key, {
+            alt: asset.label,
+            className: "emoji-icon emoji-button-icon",
+          }));
+          const label = document.createElement("span");
+          label.textContent = asset.label;
+          button.appendChild(label);
+          button.addEventListener("click", () => {
+            if (editGroupEmojiInput) editGroupEmojiInput.value = asset.key;
+            updateEditEmojiPickerUI();
+            closeEditEmojiPicker();
+          });
+          grid.appendChild(button);
+        });
+
+        section.appendChild(grid);
+        editGroupEmojiScroll.appendChild(section);
+      });
+    }
+
+    function ensureEditEmojiPickerRendered() {
+      if (editEmojiPickerRendered) return;
+      renderEditEmojiPicker();
+      updateEditEmojiPickerUI();
+      editEmojiPickerRendered = true;
+    }
+
+    function updateEditEmojiPickerUI() {
+      const value = (editGroupEmojiInput && editGroupEmojiInput.value || "").trim();
+      if (editGroupEmojiValue) {
+        if (value) {
+          const asset = window.BYEmoji.resolve(value);
+          editGroupEmojiValue.textContent = "";
+          editGroupEmojiValue.appendChild(window.BYEmoji.createInline(value, asset.label, {
+            className: "emoji-icon emoji-inline",
+          }));
+        } else {
+          editGroupEmojiValue.textContent = "Selecciona un icono";
+        }
+      }
+      if (editGroupEmojiScroll) {
+        editGroupEmojiScroll.querySelectorAll(".emoji-option").forEach((button) => {
+          button.classList.toggle("emoji-option-selected", button.dataset.emoji === value);
+        });
+      }
+    }
+
+    function openEditEmojiPicker() {
+      if (!editGroupEmojiMenu || !editGroupEmojiTrigger) return;
+      ensureEditEmojiPickerRendered();
+      editGroupEmojiMenu.hidden = false;
+      editGroupEmojiTrigger.setAttribute("aria-expanded", "true");
+    }
+
+    function closeEditEmojiPicker() {
+      if (!editGroupEmojiMenu || !editGroupEmojiTrigger) return;
+      editGroupEmojiMenu.hidden = true;
+      editGroupEmojiTrigger.setAttribute("aria-expanded", "false");
+    }
+
     function setDetailEditMode(editing) {
       editableFields.forEach((el) => {
         if (el === stockMinDetail || el === fractionCountDetail || el === saleUnitDetail) return;
+        if (editNewGroupInputs.includes(el)) return;
         el.disabled = !editing;
       });
       if (actionsView) actionsView.style.display = editing ? "none" : "";
       if (actionsEdit) actionsEdit.style.display = editing ? "" : "none";
       syncDetailStockFields();
       syncDetailFractionalFields();
+      syncDetailGroupFields();
     }
 
     if (stockInfDetail) stockInfDetail.addEventListener("change", syncDetailStockFields);
@@ -263,6 +682,18 @@
         saleUnitDetail.value = (stockUnitDetail.value || "ud").trim() || "ud";
       });
     }
+    if (groupSelectDetail) groupSelectDetail.addEventListener("change", syncDetailGroupFields);
+    if (editGroupEmojiTrigger) {
+      editGroupEmojiTrigger.addEventListener("click", () => {
+        if (!editGroupEmojiMenu || editGroupEmojiMenu.hidden) openEditEmojiPicker();
+        else closeEditEmojiPicker();
+      });
+    }
+    document.addEventListener("click", (event) => {
+      const picker = document.getElementById("editGroupEmojiPicker");
+      if (!picker || picker.contains(event.target)) return;
+      closeEditEmojiPicker();
+    });
     if (btnEditDetail) btnEditDetail.addEventListener("click", () => setDetailEditMode(true));
     if (btnCancelDetail) {
       btnCancelDetail.addEventListener("click", () => {
@@ -270,6 +701,9 @@
           if (el.type === "checkbox") el.checked = !!initialState[el.name];
           else el.value = initialState[el.name] ?? "";
         });
+        if (editGroupNameInput) editGroupNameInput.value = "";
+        if (editGroupEmojiInput) editGroupEmojiInput.value = "";
+        updateEditEmojiPickerUI();
         setDetailEditMode(false);
       });
     }
@@ -277,6 +711,16 @@
     detailForm.addEventListener("submit", (event) => {
       const submitter = event.submitter;
       if (submitter && submitter.id === "btnDeleteDetail") return;
+
+      if (isDetailNewGroupSelected()) {
+        if (!editGroupNameInput || !(editGroupNameInput.value || "").trim() || !editGroupEmojiInput || !(editGroupEmojiInput.value || "").trim()) {
+          event.preventDefault();
+          syncDetailGroupFields();
+          updateEditEmojiPickerUI();
+          alert("Completa el nombre y el icono del nuevo grupo antes de guardar.");
+          return;
+        }
+      }
 
       editableFields.forEach((el) => {
         if (el.classList.contains("js-eur-input")) {

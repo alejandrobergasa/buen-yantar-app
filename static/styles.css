@@ -46,6 +46,11 @@ body {
 
 .app-zoom-shell {
   min-height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 body.app-zoom-fallback .app-zoom-shell {
@@ -117,6 +122,42 @@ body.app-zoom-fallback .app-zoom-shell {
   color: rgba(255, 255, 255, 0.88);
 }
 
+.emoji-icon {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.18em;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.emoji-inline {
+  margin-right: 0.16em;
+}
+
+.emoji-with-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.emoji-text {
+  min-width: 0;
+}
+
+.emoji-block {
+  width: 1.6rem;
+  height: 1.6rem;
+  vertical-align: middle;
+}
+
+.emoji-button-icon {
+  width: 1.35rem;
+  height: 1.35rem;
+  vertical-align: middle;
+}
+
 .top-actions {
   display: flex;
   align-items: center;
@@ -149,6 +190,22 @@ body.app-zoom-fallback .app-zoom-shell {
   outline: none;
 }
 
+.link-exit {
+  background: #7f1d1d;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.link-exit:hover,
+.link-exit:focus-visible {
+  background: #991b1b;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.link-exit:active {
+  background: #651717;
+}
+
 .container {
   max-width: 90rem;
   margin: 0 auto;
@@ -159,6 +216,7 @@ body.app-zoom-fallback .app-zoom-shell {
   display: grid;
   gap: 0.55rem;
   margin-bottom: 0.85rem;
+  min-height: 0;
 }
 
 .flash-item {
@@ -527,6 +585,10 @@ select.field-invalid:focus {
 .help {
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.list-loading-state {
+  margin-top: 0.45rem;
 }
 
 .sep {
@@ -1762,6 +1824,9 @@ body::before {
   gap: 0.9rem;
   padding-top: 1rem;
   padding-bottom: 1.4rem;
+  min-height: 0;
+  align-content: start;
+  overflow: hidden;
 }
 
 .flash-item {
@@ -2588,6 +2653,45 @@ body {
   flex-direction: column;
 }
 
+.route-gestion_usuarios .user-settings-grid,
+.route-configuracion_usuarios .user-settings-grid {
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.route-gestion_usuarios .user-settings-grid > .user-settings-panel,
+.route-configuracion_usuarios .user-settings-grid > .user-settings-panel {
+  height: 100%;
+}
+
+.route-gestion_usuarios .user-settings-table-card,
+.route-configuracion_usuarios .user-settings-table-card {
+  overflow: hidden;
+}
+
+.route-configuracion_grupos .group-config-layout {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.route-configuracion_grupos .group-config-layout > .panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.route-configuracion_grupos .group-table-card {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.route-configuracion_grupos .group-table-card > .inv-scrollbox {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
+}
+
 .route-login .container {
   overflow: hidden;
 }
@@ -2653,6 +2757,10 @@ body {
   flex-direction: column;
 }
 
+.home-side-panels {
+  min-width: 0;
+}
+
 .home-side-panel {
   overflow: hidden;
 }
@@ -2661,6 +2769,7 @@ body {
   display: grid;
   gap: 0.9rem;
   min-height: 0;
+  align-content: start;
 }
 
 .home-action-group {
@@ -2813,6 +2922,7 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(19rem, 0.8fr);
   gap: 0.7rem;
+  min-height: 0;
 }
 
 .settings-shortcuts-grid {
@@ -2826,6 +2936,7 @@ body {
 .settings-user-layout {
   display: grid;
   gap: 0.7rem;
+  min-height: 0;
 }
 
 .settings-stack {
@@ -2873,6 +2984,87 @@ body {
   min-width: 11rem;
   font-size: 0.94rem;
   padding: 0.44rem 0.55rem;
+}
+
+.user-settings-grid {
+  min-height: 0;
+  align-items: stretch;
+}
+
+.user-settings-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.user-settings-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.user-settings-role-row {
+  align-items: end;
+}
+
+.user-settings-role-row .actions {
+  height: 100%;
+}
+
+.user-settings-table-card {
+  min-height: 0;
+}
+
+.user-settings-table-box {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
+}
+
+.group-config-layout {
+  min-height: 0;
+}
+
+.group-config-panel {
+  min-width: 0;
+}
+
+.group-config-form,
+.group-edit-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.group-config-grid,
+.group-edit-fields {
+  align-items: end;
+}
+
+.group-emoji-picker {
+  min-width: 0;
+}
+
+.group-emoji-picker .emoji-picker-trigger {
+  width: 100%;
+}
+
+.group-name-chip {
+  font-weight: 800;
+}
+
+.group-table-card .table td {
+  vertical-align: top;
+}
+
+.group-edit-fields {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.1fr) minmax(11rem, 0.95fr) auto;
+  gap: 0.45rem;
+}
+
+.group-edit-fields .btn {
+  min-width: 6.8rem;
 }
 
 .home-compact-list {
@@ -3944,6 +4136,16 @@ body.route-analisis {
   align-items: start;
 }
 
+.shopping-filter-form {
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.shopping-filter-toggle {
+  display: flex;
+  align-items: end;
+}
+
 .shopping-dialog-list {
   min-height: auto;
   max-height: 55vh;
@@ -4011,6 +4213,11 @@ body.route-analisis {
 }
 
 .shopping-dialog-actions {
+  justify-content: flex-end;
+}
+
+.shopping-filter-form .actions {
+  align-items: end;
   justify-content: flex-end;
 }
 
@@ -4179,6 +4386,7 @@ body.route-analisis {
   .route-home .home-layout,
   .route-configuracion .settings-grid,
   .route-configuracion_caja .settings-grid,
+  .route-configuracion_grupos .group-config-layout,
   .route-configuracion_usuarios .home-layout,
   .route-gestion_usuarios .home-layout,
   .route-inventario .inv-grid,
@@ -4571,17 +4779,24 @@ body.route-analisis {
 
 .emoji-picker-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
 }
 
 .emoji-option {
-  min-height: 2.4rem;
+  min-height: 2.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
   border: 1px solid rgba(31, 109, 95, 0.12);
   border-radius: 0.7rem;
   background: #ffffff;
   cursor: pointer;
-  font-size: 1.15rem;
+  font-size: 0.88rem;
+  font-weight: 800;
   line-height: 1;
   transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
@@ -4826,6 +5041,7 @@ body.route-analisis {
   flex-direction: column;
   gap: 0.75rem;
   min-height: 0;
+  overflow: hidden;
 }
 
 .route-analisis .table-card {
@@ -5149,15 +5365,26 @@ body.route-analisis {
 
 @media (max-height: 48rem) and (min-width: 64rem) {
   :root {
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .topbar {
-    padding: 0.32rem 0.65rem;
+    padding: 0.28rem 0.55rem;
   }
 
   .topbar-inner {
-    gap: 0.35rem 0.7rem;
+    gap: 0.25rem 0.6rem;
+  }
+
+  .brand {
+    font-size: 1.05rem;
+  }
+
+  .link,
+  .status-pill,
+  .user-badge {
+    padding: 0.18rem 0.48rem;
+    font-size: 0.82rem;
   }
 
   .status-pill {
@@ -5171,35 +5398,61 @@ body.route-analisis {
   }
 
   .container.page-stack {
-    gap: 0.35rem;
-    padding: 0.35rem 0.45rem 0.45rem;
+    gap: 0.3rem;
+    padding: 0.3rem 0.4rem 0.4rem;
   }
 
   .route-analisis .container.page-stack {
-    padding: 0.65rem;
-    gap: 0.55rem;
+    padding: 0.38rem 0.42rem 0.42rem;
+    gap: 0.32rem;
+  }
+
+  .page-stack {
+    padding-top: 0.3rem;
+    padding-bottom: 0.35rem;
+  }
+
+  .flash {
+    gap: 0.35rem;
+    max-height: 5.5rem;
+    overflow: auto;
+    padding-right: 0.08rem;
+  }
+
+  .flash-item {
+    padding: 0.42rem 0.58rem;
+  }
+
+  .section-heading,
+  .panel-title {
+    font-size: 1rem;
+  }
+
+  .page-title {
+    font-size: clamp(1.08rem, 1.6vw, 1.35rem);
+    margin-bottom: 0.18rem;
   }
 
   .panel {
-    padding: 0.62rem;
+    padding: 0.52rem;
   }
 
   .page-intro.hero-intro,
   .page-header-bar {
-    padding: 0.52rem 0.68rem;
+    padding: 0.44rem 0.6rem;
   }
 
   .section-head {
-    margin-bottom: 0.42rem;
+    margin-bottom: 0.3rem;
   }
 
   .action-card,
   .action-card-short {
-    padding: 0.58rem;
+    padding: 0.48rem 0.55rem;
   }
 
   .home-menu-emoji {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
   }
 
   .home-clean-layout,
@@ -5216,54 +5469,318 @@ body.route-analisis {
 
   .home-action-groups,
   .home-action-group {
-    gap: 0.45rem;
+    gap: 0.32rem;
   }
 
   .route-home .home-side-panels {
-    grid-template-rows: auto minmax(0, 1.12fr) minmax(0, 0.72fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .route-home .home-side-panels-single {
-    grid-template-rows: auto auto;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  .route-home .home-clean-layout {
+    grid-template-columns: minmax(0, 1.35fr) minmax(18rem, 0.82fr);
+  }
+
+  .route-home .home-main-panel,
+  .route-home .home-side-panel {
+    overflow: hidden;
+  }
+
+  .route-home .home-main-panel {
+    padding-bottom: 0.45rem;
+  }
+
+  .route-home .home-action-groups {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding-right: 0.08rem;
+  }
+
+  .route-home .home-menu-card {
+    min-height: 5.5rem;
+    aspect-ratio: auto;
+    gap: 0.35rem;
+  }
+
+  .route-home .home-menu-card h2 {
+    font-size: 0.95rem;
+    max-width: none;
+  }
+
+  .route-home .cash-balance-card strong {
+    font-size: clamp(1.35rem, 2.1vw, 1.7rem);
+  }
+
+  .route-home .home-side-panel-stock {
+    min-height: 0;
   }
 
   .table-card {
-    padding-top: 0.62rem;
+    padding-top: 0.52rem;
   }
 
   .table th,
   .table td {
-    padding: 0.38rem 0.42rem;
+    padding: 0.3rem 0.36rem;
+    font-size: 0.84rem;
+  }
+
+  .table th {
+    font-size: 0.76rem;
   }
 
   .purchase-inline-fields,
   .invoice-inline-fields {
-    gap: 0.35rem 0.55rem;
+    gap: 0.28rem 0.45rem;
+    grid-template-columns: auto minmax(8.5rem, 10.5rem) auto minmax(0, 1fr);
+  }
+
+  .input,
+  select {
+    min-height: 2.2rem;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.9rem;
+  }
+
+  .btn {
+    min-height: 2.28rem;
+    padding: 0.38rem 0.62rem;
+    font-size: 0.9rem;
+  }
+
+  .actions {
+    gap: 0.4rem;
+  }
+
+  .actions .btn {
+    min-width: 8.5rem;
   }
 
   .invoice-total-live {
-    min-height: 2.05rem;
-    padding: 0.38rem 0.58rem;
+    min-height: 1.95rem;
+    padding: 0.3rem 0.48rem;
   }
 
   .analysis-selector-panel,
   .analysis-filter-panel {
-    padding: 0.65rem 0.75rem;
+    padding: 0.45rem 0.55rem;
   }
 
   .analysis-choice {
-    padding: 0.8rem 0.85rem;
+    padding: 0.55rem 0.6rem;
   }
 
   .analysis-detail-summary-card {
-    padding: 0.78rem 0.85rem;
+    padding: 0.56rem 0.62rem;
+  }
+
+  .analysis-detail-summary-card strong {
+    font-size: 1.05rem;
   }
 
   .analysis-detail-scroll {
-    max-height: 52vh;
+    max-height: none;
   }
 
   .settings-data-box {
-    max-height: 56vh;
+    max-height: none;
+  }
+
+  .route-inventario .inv-grid {
+    grid-template-columns: minmax(18rem, 0.92fr) minmax(0, 1.22fr);
+  }
+
+  .route-inventario .inv-panel {
+    gap: 0.35rem;
+  }
+
+  .route-inventario .inv-filters {
+    gap: 0.42rem;
+    padding: 0.42rem;
+  }
+
+  .route-inventario .detail-split {
+    grid-template-columns: minmax(0, 1.06fr) minmax(15rem, 0.84fr);
+    gap: 0.45rem;
+  }
+
+  .route-inventario .detail-main,
+  .route-inventario .detail-side,
+  .route-inventario .inv-newbox {
+    padding: 0.48rem;
+  }
+
+  .route-nueva_factura .purchase-layout,
+  .route-nueva_compra .purchase-layout {
+    grid-template-columns: minmax(17rem, 0.84fr) minmax(0, 1.16fr);
+    gap: 0.45rem;
+  }
+
+  .route-nueva_factura .purchase-left,
+  .route-nueva_compra .purchase-left,
+  .route-nueva_factura .purchase-right,
+  .route-nueva_compra .purchase-right {
+    overflow: hidden;
+  }
+
+  .route-nueva_factura .purchase-products-box,
+  .route-nueva_compra .purchase-products-box {
+    flex-basis: 45%;
+  }
+
+  .route-nueva_factura .purchase-lines-box,
+  .route-nueva_compra .purchase-lines-box {
+    flex-basis: 55%;
+  }
+
+  .route-nueva_factura .invoice-submit-row,
+  .route-nueva_compra .purchase-submit-row {
+    gap: 0.45rem;
+  }
+
+  .route-historial_facturas .page-stack,
+  .route-historial_compras .page-stack,
+  .route-historial_gastos_libres .page-stack,
+  .route-supervision .page-stack,
+  .route-configuracion .page-stack,
+  .route-configuracion_caja .page-stack,
+  .route-configuracion_usuarios .page-stack,
+  .route-configuracion_logs .page-stack,
+  .route-gestion_usuarios .page-stack {
+    gap: 0.3rem;
+  }
+
+  .route-historial_facturas .panel:not(.table-card),
+  .route-historial_compras .panel:not(.table-card),
+  .route-historial_gastos_libres .panel:not(.table-card),
+  .route-supervision .panel:not(.table-card),
+  .route-configuracion .panel:not(.table-card),
+  .route-configuracion_caja .panel:not(.table-card),
+  .route-configuracion_usuarios .panel:not(.table-card),
+  .route-configuracion_logs .panel:not(.table-card),
+  .route-gestion_usuarios .panel:not(.table-card) {
+    flex: 0 0 auto;
+  }
+
+  .route-historial_facturas .table-card,
+  .route-historial_compras .table-card,
+  .route-historial_gastos_libres .table-card,
+  .route-supervision .table-card,
+  .route-configuracion .table-card,
+  .route-configuracion_caja .table-card,
+  .route-configuracion_usuarios .table-card,
+  .route-configuracion_logs .table-card,
+  .route-gestion_usuarios .table-card {
+    overflow: hidden;
+  }
+
+  .route-configuracion .settings-shortcuts-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .route-configuracion .settings-grid,
+  .route-configuracion_caja .settings-grid {
+      grid-template-columns: minmax(0, 1.08fr) minmax(15rem, 0.92fr);
+      gap: 0.45rem;
+    }
+
+  .route-configuracion_grupos .group-edit-fields {
+      grid-template-columns: minmax(8rem, 1fr) minmax(10rem, 0.9fr) auto;
+      gap: 0.35rem;
+    }
+
+  .route-configuracion .settings-user-layout,
+  .route-configuracion_usuarios .settings-user-layout,
+  .route-gestion_usuarios .settings-user-layout {
+    grid-template-columns: minmax(15rem, 0.82fr) minmax(0, 1.18fr);
+    gap: 0.45rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-grid,
+  .route-gestion_usuarios .user-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-panel,
+  .route-gestion_usuarios .user-settings-panel {
+    padding-bottom: 0.48rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-form,
+  .route-gestion_usuarios .user-settings-form {
+    gap: 0.45rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-form .grid-2,
+  .route-gestion_usuarios .user-settings-form .grid-2 {
+    gap: 0.35rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-role-row,
+  .route-gestion_usuarios .user-settings-role-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .route-configuracion_usuarios .user-settings-role-row .actions,
+  .route-gestion_usuarios .user-settings-role-row .actions {
+    justify-content: flex-end;
+    align-items: end;
+  }
+
+  .route-configuracion_usuarios .user-settings-role-row .btn,
+  .route-gestion_usuarios .user-settings-role-row .btn {
+    min-width: 7.5rem;
+  }
+
+  .route-configuracion_usuarios .user-settings-table-card > .section-head,
+  .route-gestion_usuarios .user-settings-table-card > .section-head {
+    margin-bottom: 0.3rem;
+  }
+
+  .route-analisis .analysis-page-shell {
+    gap: 0.32rem;
+  }
+
+  .route-analisis .analysis-selector-grid {
+    gap: 0.35rem;
+  }
+
+  .route-analisis .analysis-filter-toolbar {
+    gap: 0.35rem 0.5rem;
+  }
+
+  .route-analisis .analysis-type-checklist {
+    min-height: 2rem;
+    gap: 0.28rem 0.55rem;
+    padding: 0.28rem 0.45rem;
+  }
+
+  .route-analisis .analysis-filter-field .input,
+  .route-analisis .analysis-filter-field select {
+    min-height: 2.1rem;
+  }
+
+  .route-analisis .analysis-detail-summary-grid {
+    gap: 0.35rem;
+  }
+
+  .route-analisis .table-card > .inv-scrollbox,
+  .route-configuracion .table-card > .inv-scrollbox,
+  .route-configuracion_logs .table-card > .inv-scrollbox,
+  .route-supervision .table-card > .inv-scrollbox,
+  .route-historial_facturas .table-card > .inv-scrollbox,
+  .route-historial_compras .table-card > .inv-scrollbox,
+  .route-historial_gastos_libres .table-card > .inv-scrollbox,
+  .route-gestion_usuarios .table-card > .inv-scrollbox {
+    height: 100%;
+  }
+
+  .shopping-dialog-shell {
+    max-height: calc(100dvh - 1.25rem);
   }
 }

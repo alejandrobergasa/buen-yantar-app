@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Compras">
+  <path d="M12 22h18l-2 28H14z" fill="#5bc0be"/>
+  <path d="M34 18h18l-2 32H36z" fill="#f4b860"/>
+  <path d="M18 24c0-4 2-7 6-7s6 3 6 7M40 20c0-4 2-7 6-7s6 3 6 7" fill="none" stroke="#4a5568" stroke-width="3" stroke-linecap="round"/>
+</svg>

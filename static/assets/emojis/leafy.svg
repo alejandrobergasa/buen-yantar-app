@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hortalizas">
+  <path d="M32 56c-5-5-9-13-9-22 0-11 7-20 9-22 2 2 9 11 9 22 0 9-4 17-9 22z" fill="#5ca94a"/>
+  <path d="M32 56c0-8 2-16 7-22 5-6 10-9 16-10-1 8-4 15-10 21-4 4-8 7-13 11z" fill="#7bc45f"/>
+  <path d="M32 56c0-8-2-16-7-22-5-6-10-9-16-10 1 8 4 15 10 21 4 4 8 7 13 11z" fill="#74bc59"/>
+  <path d="M32 18v34" stroke="#3e7f35" stroke-width="3" stroke-linecap="round"/>
+</svg>

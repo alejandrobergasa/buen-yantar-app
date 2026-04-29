@@ -21,7 +21,7 @@
               <select id="groupFilter" name="g">
                 <option value="">(Todos)</option>
                 {% for g, e in group_options %}
-                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ g }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -32,7 +32,7 @@
             </label>
 
             <div class="actions">
-              <a class="btn btn-secondary btn-small" href="{{ url_for('inventario') }}">Limpiar</a>
+              <a class="btn btn-secondary btn-small" href="{{ url_for('inventario') }}" id="inventoryClearFilters">Limpiar</a>
             </div>
           </div>
         </form>
@@ -49,7 +49,7 @@
               <select id="groupFilter">
                 <option value="">(Todos)</option>
                 {% for g, e in group_options %}
-                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+                  <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ g }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -85,7 +85,7 @@
                 >
                   <td>
                     <div class="product-row-head">
-                      <span class="product-name">{{ r.grupo_emoji }} {{ r.nombre }}</span>
+                      <span class="product-name">{{ emoji_icon(r.grupo_emoji, alt=r.nombre, class_name="emoji-inline") }}<span>{{ r.nombre }}</span></span>
                       {% if r.stock_infinito == "1" %}
                         <span class="product-state state-inf">INF</span>
                       {% elif r.total == 0 %}
@@ -103,7 +103,7 @@
 
                   <td class="right">
                     {% if r.stock_infinito == "1" %}
-                      ♾️
+                      {{ emoji_icon("infinity", alt="Stock infinito") }}
                     {% else %}
                       <div class="stock-display-main">{{ r.stock_display_main }}</div>
                       {% if not low_resource_mode and r.stock_display_meta %}
@@ -118,29 +118,28 @@
 
           <div class="empty inventory-no-results" id="inventoryNoResults" hidden>No hay productos que coincidan con los filtros actuales.</div>
         </div>
+        <div class="help list-loading-state" id="inventoryFilterLoading" hidden>Actualizando productos...</div>
         {% if low_resource_mode %}
-          <div class="help">
+          <div class="help" id="inventoryBrowserSummary">
             {% if product_browser.total %}
               Mostrando {{ product_browser.shown_from }}-{{ product_browser.shown_to }} de {{ product_browser.total }} productos.
             {% else %}
               No hay productos que coincidan con los filtros actuales.
             {% endif %}
           </div>
-          {% if product_browser.page_count > 1 %}
-          <div class="actions">
+          <div class="actions" id="inventoryBrowserActions" {% if product_browser.page_count <= 1 %}hidden{% endif %}>
             {% if product_browser.has_prev %}
-              <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}">Anterior</a>
+              <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}" id="inventoryPrevPage">Anterior</a>
             {% else %}
-              <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+              <span class="btn btn-secondary btn-small" aria-disabled="true" id="inventoryPrevPage">Anterior</span>
             {% endif %}
-            <span class="help">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
+            <span class="help" id="inventoryPageInfo">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
             {% if product_browser.has_next %}
-              <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}">Siguiente</a>
+              <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}" id="inventoryNextPage">Siguiente</a>
             {% else %}
-              <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+              <span class="btn btn-secondary btn-small" aria-disabled="true" id="inventoryNextPage">Siguiente</span>
             {% endif %}
           </div>
-          {% endif %}
         {% endif %}
       </div>
     </section>
@@ -219,34 +218,30 @@
                   <label class="label">Grupo</label>
                   <select class="input js-live-field" name="grupo_select" id="grupoSelect" data-rule="required">
                     {% for g, e in group_options %}
-                      <option value="{{ g }}" data-emoji="{{ e }}">{{ e }} {{ g }}</option>
+                      <option value="{{ g }}" data-emoji="{{ e }}">{{ g }}</option>
                     {% endfor %}
                     <option value="__new__">Nuevo grupo...</option>
                   </select>
                 </div>
               </div>
 
-              <div id="newGroupFields" style="display:none;">
+              <div id="newGroupFields" hidden aria-hidden="true">
                 <div class="grid-2">
                   <div>
                     <label class="label">Nombre del grupo</label>
                     <input class="input js-live-field" name="grupo_custom" data-rule="required-when-new-group" placeholder="Ej: Verduras">
                   </div>
                   <div>
-                    <label class="label">Emoji del grupo</label>
-                    {% if low_resource_mode %}
-                    <input class="input js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group" placeholder="Ej: 🥬">
-                    {% else %}
+                    <label class="label">Icono del grupo</label>
                     <input type="hidden" class="js-live-field" name="grupo_emoji_custom" id="groupEmojiInput" data-rule="required-when-new-group">
                     <div class="emoji-picker" id="groupEmojiPicker">
                       <button class="input emoji-picker-trigger" type="button" id="groupEmojiTrigger" aria-expanded="false" aria-controls="groupEmojiMenu">
-                        <span class="emoji-picker-value" id="groupEmojiValue">Selecciona un emoji</span>
+                        <span class="emoji-picker-value" id="groupEmojiValue">Selecciona un icono</span>
                       </button>
                       <div class="emoji-picker-menu" id="groupEmojiMenu" hidden>
                         <div class="emoji-picker-scroll" id="groupEmojiScroll"></div>
                       </div>
                     </div>
-                    {% endif %}
                   </div>
                 </div>
               </div>
@@ -286,9 +281,37 @@
                       </div>
                       <div>
                         <label class="label">Grupo</label>
-                        <div class="input-prefix-wrap">
-                          <span class="input-prefix">{{ selected.grupo_emoji }}</span>
-                          <input class="input input-prefixed js-detail-input" name="grupo" value="{{ selected.grupo }}" disabled>
+                        <select class="input js-detail-input js-detail-group-select" name="grupo_select" id="editGrupoSelect" disabled>
+                          {% set selected_group_in_options = namespace(found=false) %}
+                          {% for g, e in group_options %}
+                            {% if selected.grupo == g %}{% set selected_group_in_options.found = true %}{% endif %}
+                            <option value="{{ g }}" data-emoji="{{ e }}" {% if selected.grupo == g %}selected{% endif %}>{{ g }}</option>
+                          {% endfor %}
+                          {% if selected.grupo and not selected_group_in_options.found %}
+                            <option value="{{ selected.grupo }}" data-emoji="{{ selected.grupo_emoji }}" selected>{{ selected.grupo }}</option>
+                          {% endif %}
+                          <option value="__new__">Nuevo grupo...</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div id="editNewGroupFields" hidden aria-hidden="true">
+                      <div class="grid-2">
+                        <div>
+                          <label class="label">Nombre del grupo</label>
+                          <input class="input js-detail-input js-edit-new-group-field" name="grupo_custom" id="editGroupNameInput" data-rule="required-when-new-group" placeholder="Ej: Verduras" disabled>
+                        </div>
+                        <div>
+                          <label class="label">Icono del grupo</label>
+                          <input type="hidden" class="js-detail-input js-edit-new-group-field" name="grupo_emoji_custom" id="editGroupEmojiInput" data-rule="required-when-new-group" disabled>
+                          <div class="emoji-picker" id="editGroupEmojiPicker">
+                            <button class="input emoji-picker-trigger" type="button" id="editGroupEmojiTrigger" aria-expanded="false" aria-controls="editGroupEmojiMenu">
+                              <span class="emoji-picker-value" id="editGroupEmojiValue">Selecciona un icono</span>
+                            </button>
+                            <div class="emoji-picker-menu" id="editGroupEmojiMenu" hidden>
+                              <div class="emoji-picker-scroll" id="editGroupEmojiScroll"></div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -348,8 +371,6 @@
                     {% if selected.fraccionable == "1" %}
                       <div class="help">Cada {{ selected.unidad }} equivale a {{ selected.fracciones_por_unidad }} {{ selected.unidad_venta }}.</div>
                     {% endif %}
-
-                    <input type="hidden" name="grupo_emoji" value="{{ selected.grupo_emoji }}">
 
                     <label class="inv-check">
                       <input type="checkbox" class="js-detail-input js-stock-inf-detail" name="stock_infinito" {% if is_inf %}checked{% endif %} disabled>
@@ -475,6 +496,9 @@
       createBtn.classList.toggle("btn-secondary", show);
     }
     if (show) {
+      if (window.syncInventoryGroupFields) {
+        window.syncInventoryGroupFields();
+      }
       box.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
@@ -621,43 +645,50 @@
   const groupEmojiMenu = document.getElementById("groupEmojiMenu");
   const groupEmojiScroll = document.getElementById("groupEmojiScroll");
   let emojiPickerRendered = false;
-  const EMOJI_GROUPS = [
-    { color: "Rojo", emojis: ["🍎", "🍓", "🍒", "🍅", "🌹", "🌺", "🥩", "🎈", "🚗", "📕", "🎒", "🎸", "🔴", "❤", "💋", "🏓", "🥊", "🦀"] },
-    { color: "Naranja", emojis: ["🍊", "🍑", "🥕", "🧅", "🦊", "🐅", "🦁", "🏀", "🏺", "🥐", "📙", "🔶", "🍂", "🎃", "🦐", "🎻"] },
-    { color: "Amarillo", emojis: ["🍋", "🍌", "🌕", "⭐", "🌟", "🌻", "🌼", "🐤", "🐥", "🧀", "🍯", "🌽", "🔔", "🔑", "💡", "📒", "🍺", "🍟", "🚕", "📀"] },
-    { color: "Verde", emojis: ["🥬", "🥒", "🍏", "🍐", "🍀", "🌿", "🌲", "🌳", "🐢", "🐍", "🦎", "🥦", "📗", "🥗", "🚜", "🔋"] },
-    { color: "Azul", emojis: ["🐟", "🐬", "🐳", "🦋", "🌊", "☔", "📘", "🔷", "🚙", "📫", "📷", "⌚", "🎽", "🧢", "❄", "💧"] },
-    { color: "Morado", emojis: ["🍇", "🍆", "🔮", "👾", "😈", "📔", "🎵", "🎭", "🦄", "🎆", "🍬", "📿", "☂", "🎼", "🦑"] },
-    { color: "Rosa", emojis: ["🌸", "🌷", "🎀", "🐷", "💗", "💖", "💝", "🍥", "🍧", "🧁", "🍬", "🎂", "🍨", "👚", "💞", "🎟"] },
-    { color: "Marron", emojis: ["🥔", "🍞", "🥖", "🍪", "🍫", "☕", "🐻", "📦", "🥜", "🍄", "🐌", "🏈", "👜", "🪑", "🎻", "🧸"] },
-    { color: "Blanco", emojis: ["🥚", "🥛", "🍚", "🍽", "🧂", "🧄", "☁", "⚪", "📄", "🍙", "🍨", "🍼", "🛁", "🕯", "🐚", "🦢"] },
-    { color: "Negro", emojis: ["🎩", "🐈", "🐜", "🎱", "♠", "♣", "🖥", "🎤", "⚫", "📞", "🎬", "🧳", "🐦", "🌑", "🦇", "🖱"] },
-    { color: "Multicolor", emojis: ["🌈", "🥤", "🍷", "🍸", "🍹", "🍰", "🍕", "🍔", "🍜", "🍣", "🍭", "🎨", "🎉", "🛒", "🧹", "🎁", "🎯", "🎲", "🎪", "🎊"] },
-  ];
+  const EMOJI_CHOICES = {{ emoji_picker_assets|tojson }};
+  const EMOJI_CATEGORY_ORDER = ["food", "drink", "object"];
+  const EMOJI_CATEGORY_LABELS = {
+    food: "Comida",
+    drink: "Bebidas",
+    object: "Objetos",
+  };
+
+  function isNewGroupSelected() {
+    return !!grupoSelect && (grupoSelect.value || "").trim() === "__new__";
+  }
 
   function renderEmojiPicker() {
     if (!groupEmojiScroll) return;
     groupEmojiScroll.innerHTML = "";
 
-    EMOJI_GROUPS.forEach((group) => {
+    EMOJI_CATEGORY_ORDER.forEach((category) => {
+      const categoryItems = EMOJI_CHOICES.filter((emoji) => (emoji.category || "object") === category);
+      if (!categoryItems.length) return;
+
       const section = document.createElement("section");
       section.className = "emoji-group";
 
       const title = document.createElement("div");
       title.className = "emoji-group-title";
-      title.textContent = group.color;
+      title.textContent = EMOJI_CATEGORY_LABELS[category] || "Catalogo de iconos";
       section.appendChild(title);
 
       const grid = document.createElement("div");
       grid.className = "emoji-picker-grid";
 
-      group.emojis.forEach((emoji) => {
+      categoryItems.forEach((emoji) => {
         const button = document.createElement("button");
         button.className = "emoji-option";
         button.type = "button";
-        button.dataset.emoji = emoji;
-        button.setAttribute("aria-label", `Elegir ${emoji}`);
-        button.textContent = emoji;
+        button.dataset.emoji = emoji.key;
+        button.setAttribute("aria-label", `Elegir ${emoji.label}`);
+        button.appendChild(window.BYEmoji.createImage(emoji.key, {
+          alt: emoji.label,
+          className: "emoji-icon emoji-button-icon",
+        }));
+        const label = document.createElement("span");
+        label.textContent = emoji.label;
+        button.appendChild(label);
         button.addEventListener("click", () => {
           if (groupEmojiInput) {
             groupEmojiInput.value = button.dataset.emoji || "";
@@ -682,14 +713,20 @@
   }
 
   function syncGroupUI() {
-    const isNewGroup = grupoSelect.value === "__new__";
-    newGroupFields.style.display = isNewGroup ? "block" : "none";
+    if (!grupoSelect || !newGroupFields) return;
+    const isNewGroup = isNewGroupSelected();
+    newGroupFields.hidden = !isNewGroup;
+    newGroupFields.setAttribute("aria-hidden", isNewGroup ? "false" : "true");
+    newGroupFields.style.display = isNewGroup ? "" : "none";
     if (!isNewGroup) {
       closeEmojiPicker();
     }
   }
 
-  grupoSelect.addEventListener("change", syncGroupUI);
+  window.syncInventoryGroupFields = syncGroupUI;
+  if (grupoSelect) {
+    grupoSelect.addEventListener("change", syncGroupUI);
+  }
   syncGroupUI();
 
   function syncStockActualUI() {
@@ -737,7 +774,15 @@
   function updateEmojiPickerUI() {
     const value = (groupEmojiInput && groupEmojiInput.value || "").trim();
     if (groupEmojiValue) {
-      groupEmojiValue.textContent = value ? `${value} Seleccionado` : "Selecciona un emoji";
+      if (value) {
+        const asset = window.BYEmoji.resolve(value);
+        groupEmojiValue.textContent = "";
+        groupEmojiValue.appendChild(window.BYEmoji.createInline(value, asset.label, {
+          className: "emoji-icon emoji-inline",
+        }));
+      } else {
+        groupEmojiValue.textContent = "Selecciona un icono";
+      }
     }
     const groupEmojiOptions = Array.from(document.querySelectorAll(".emoji-option"));
     groupEmojiOptions.forEach((button) => {
@@ -816,7 +861,7 @@
   function validateField(el) {
     const rule = el.dataset.rule || "required";
     const val = (el.value || "").trim();
-    const isNewGroup = grupoSelect.value === "__new__";
+    const isNewGroup = isNewGroupSelected();
     const isInfinite = !!stockInfinitoCheckbox.checked;
     const isFractional = !!fractionableCheckbox.checked;
 
@@ -956,10 +1001,20 @@
     const fractionableDetail = detailForm.querySelector(".js-fractionable-detail");
     const fractionCountDetail = detailForm.querySelector(".js-fraction-count-detail");
     const saleUnitDetail = detailForm.querySelector(".js-sale-unit-detail");
+    const groupSelectDetail = detailForm.querySelector(".js-detail-group-select");
+    const editNewGroupFields = document.getElementById("editNewGroupFields");
+    const editNewGroupInputs = Array.from(detailForm.querySelectorAll(".js-edit-new-group-field"));
+    const editGroupNameInput = document.getElementById("editGroupNameInput");
+    const editGroupEmojiInput = document.getElementById("editGroupEmojiInput");
+    const editGroupEmojiTrigger = document.getElementById("editGroupEmojiTrigger");
+    const editGroupEmojiValue = document.getElementById("editGroupEmojiValue");
+    const editGroupEmojiMenu = document.getElementById("editGroupEmojiMenu");
+    const editGroupEmojiScroll = document.getElementById("editGroupEmojiScroll");
     const btnEditDetail = document.getElementById("btnEditDetail");
     const btnCancelDetail = document.getElementById("btnCancelDetail");
     const actionsView = document.getElementById("detailActionsView");
     const actionsEdit = document.getElementById("detailActionsEdit");
+    let editEmojiPickerRendered = false;
 
     const initialState = {};
     editableFields.forEach((el) => {
@@ -1022,16 +1077,136 @@
       }
     }
 
+    function isDetailNewGroupSelected() {
+      return !!groupSelectDetail && (groupSelectDetail.value || "").trim() === "__new__";
+    }
+
+    function syncDetailGroupFields() {
+      if (!groupSelectDetail || !editNewGroupFields) return;
+      const editing = editableFields.some((el) => !el.disabled);
+      const isNewGroup = editing && isDetailNewGroupSelected();
+      editNewGroupFields.hidden = !isNewGroup;
+      editNewGroupFields.setAttribute("aria-hidden", isNewGroup ? "false" : "true");
+      editNewGroupFields.style.display = isNewGroup ? "" : "none";
+      editNewGroupInputs.forEach((input) => {
+        input.disabled = !isNewGroup;
+      });
+      if (!isNewGroup) {
+        closeEditEmojiPicker();
+      }
+    }
+
+    function renderEditEmojiPicker() {
+      if (!editGroupEmojiScroll) return;
+      editGroupEmojiScroll.innerHTML = "";
+
+      EMOJI_CATEGORY_ORDER.forEach((category) => {
+        const categoryItems = EMOJI_CHOICES.filter((emoji) => (emoji.category || "object") === category);
+        if (!categoryItems.length) return;
+
+        const section = document.createElement("section");
+        section.className = "emoji-group";
+
+        const title = document.createElement("div");
+        title.className = "emoji-group-title";
+        title.textContent = EMOJI_CATEGORY_LABELS[category] || "Catalogo de iconos";
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "emoji-picker-grid";
+
+        categoryItems.forEach((emoji) => {
+          const button = document.createElement("button");
+          button.className = "emoji-option";
+          button.type = "button";
+          button.dataset.emoji = emoji.key;
+          button.setAttribute("aria-label", `Elegir ${emoji.label}`);
+          button.appendChild(window.BYEmoji.createImage(emoji.key, {
+            alt: emoji.label,
+            className: "emoji-icon emoji-button-icon",
+          }));
+          const label = document.createElement("span");
+          label.textContent = emoji.label;
+          button.appendChild(label);
+          button.addEventListener("click", () => {
+            if (editGroupEmojiInput) {
+              editGroupEmojiInput.value = button.dataset.emoji || "";
+            }
+            updateEditEmojiPickerUI();
+            closeEditEmojiPicker();
+          });
+          grid.appendChild(button);
+        });
+
+        section.appendChild(grid);
+        editGroupEmojiScroll.appendChild(section);
+      });
+    }
+
+    function ensureEditEmojiPickerRendered() {
+      if (editEmojiPickerRendered) return;
+      renderEditEmojiPicker();
+      updateEditEmojiPickerUI();
+      editEmojiPickerRendered = true;
+    }
+
+    function updateEditEmojiPickerUI() {
+      const value = (editGroupEmojiInput && editGroupEmojiInput.value || "").trim();
+      if (editGroupEmojiValue) {
+        if (value) {
+          const asset = window.BYEmoji.resolve(value);
+          editGroupEmojiValue.textContent = "";
+          editGroupEmojiValue.appendChild(window.BYEmoji.createInline(value, asset.label, {
+            className: "emoji-icon emoji-inline",
+          }));
+        } else {
+          editGroupEmojiValue.textContent = "Selecciona un icono";
+        }
+      }
+      if (editGroupEmojiScroll) {
+        editGroupEmojiScroll.querySelectorAll(".emoji-option").forEach((button) => {
+          button.classList.toggle("emoji-option-selected", button.dataset.emoji === value);
+        });
+      }
+    }
+
+    function openEditEmojiPicker() {
+      if (!editGroupEmojiMenu || !editGroupEmojiTrigger) return;
+      ensureEditEmojiPickerRendered();
+      const triggerRect = editGroupEmojiTrigger.getBoundingClientRect();
+      const margin = 18;
+      const spaceBelow = window.innerHeight - triggerRect.bottom - margin;
+      const spaceAbove = triggerRect.top - margin;
+      const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+
+      editGroupEmojiMenu.classList.toggle("emoji-picker-menu-up", shouldOpenUp);
+      if (editGroupEmojiScroll) {
+        const available = Math.max(180, shouldOpenUp ? spaceAbove - 16 : spaceBelow - 16);
+        editGroupEmojiScroll.style.maxHeight = `${Math.min(360, available)}px`;
+      }
+      editGroupEmojiMenu.hidden = false;
+      editGroupEmojiTrigger.setAttribute("aria-expanded", "true");
+    }
+
+    function closeEditEmojiPicker() {
+      if (!editGroupEmojiMenu || !editGroupEmojiTrigger) return;
+      editGroupEmojiMenu.hidden = true;
+      editGroupEmojiTrigger.setAttribute("aria-expanded", "false");
+      editGroupEmojiMenu.classList.remove("emoji-picker-menu-up");
+    }
+
     function setDetailEditMode(isEditing) {
       editableFields.forEach((el) => {
         if (el === stockMinDetail) return;
         if (el === fractionCountDetail || el === saleUnitDetail) return;
+        if (editNewGroupInputs.includes(el)) return;
         el.disabled = !isEditing;
       });
       if (actionsView) actionsView.style.display = isEditing ? "none" : "";
       if (actionsEdit) actionsEdit.style.display = isEditing ? "" : "none";
       syncDetailReserveField();
       syncDetailFractionalFields();
+      syncDetailGroupFields();
     }
 
     if (stockInfDetail) {
@@ -1046,6 +1221,20 @@
         saleUnitDetail.value = (stockUnitDetail.value || "ud").trim() || "ud";
       });
     }
+    if (groupSelectDetail) {
+      groupSelectDetail.addEventListener("change", syncDetailGroupFields);
+    }
+    if (editGroupEmojiTrigger) {
+      editGroupEmojiTrigger.addEventListener("click", () => {
+        if (!editGroupEmojiMenu || editGroupEmojiMenu.hidden) openEditEmojiPicker();
+        else closeEditEmojiPicker();
+      });
+    }
+    document.addEventListener("click", (event) => {
+      const picker = document.getElementById("editGroupEmojiPicker");
+      if (!picker || picker.contains(event.target)) return;
+      closeEditEmojiPicker();
+    });
     if (btnEditDetail) {
       btnEditDetail.addEventListener("click", () => setDetailEditMode(true));
     }
@@ -1056,6 +1245,9 @@
           else el.value = initialState[el.name] ?? "";
         });
         stockMinDetail.dataset.lastValue = initialReserveReal;
+        if (editGroupNameInput) editGroupNameInput.value = "";
+        if (editGroupEmojiInput) editGroupEmojiInput.value = "";
+        updateEditEmojiPickerUI();
         setDetailEditMode(false);
       });
     }
@@ -1064,6 +1256,16 @@
       const submitter = e.submitter;
       const isDelete = submitter && submitter.id === "btnDeleteDetail";
       if (isDelete) return;
+
+      if (isDetailNewGroupSelected()) {
+        if (!editGroupNameInput || !(editGroupNameInput.value || "").trim() || !editGroupEmojiInput || !(editGroupEmojiInput.value || "").trim()) {
+          e.preventDefault();
+          syncDetailGroupFields();
+          updateEditEmojiPickerUI();
+          alert("Completa el nombre y el icono del nuevo grupo antes de guardar.");
+          return;
+        }
+      }
 
       editableFields.forEach((el) => {
         if (el.classList.contains("js-stock-min") && (stockInfDetail && stockInfDetail.checked)) {

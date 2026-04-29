@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Carne">
+  <path d="M18 20c6-8 20-10 28-2s8 22 0 28-22 6-28-2-6-16 0-24z" fill="#d46a6a"/>
+  <circle cx="40" cy="28" r="5" fill="#f7d7d7"/>
+  <circle cx="46" cy="22" r="2.5" fill="#f7d7d7"/>
+</svg>

@@ -3,7 +3,7 @@
     <div class="flash" role="status" aria-live="polite" aria-atomic="true">
       {% for m in messages %}
         <div class="flash-item">
-          <span>{{ m }}</span>
+          <span>{{ emoji_text(m) }}</span>
           <button class="flash-close" type="button" data-flash-close aria-label="Cerrar mensaje">×</button>
         </div>
       {% endfor %}

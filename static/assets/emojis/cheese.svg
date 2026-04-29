@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Quesos">
+  <path d="M12 40l34-20 10 6v20H12z" fill="#f3cb46"/>
+  <circle cx="28" cy="39" r="4" fill="#e0ad2a"/>
+  <circle cx="40" cy="31" r="3" fill="#e0ad2a"/>
+  <circle cx="47" cy="42" r="4" fill="#e0ad2a"/>
+  <path d="M12 40l34-20" stroke="#f8e08a" stroke-width="4"/>
+</svg>

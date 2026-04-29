@@ -19,7 +19,7 @@
         <label class="label" for="freeExpenseCategory">Categoria</label>
         <select id="freeExpenseCategory" name="categoria" required>
           {% for category in categories %}
-          <option value="{{ category.value }}">{{ category.label }}</option>
+          <option value="{{ category.value }}">{{ category.value }}</option>
           {% endfor %}
         </select>
       </div>

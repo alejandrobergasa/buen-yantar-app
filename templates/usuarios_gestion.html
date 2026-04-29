@@ -10,13 +10,13 @@
   </div>
 </section>
 
-<div class="home-layout">
-  <section class="panel">
+<div class="home-layout user-settings-grid">
+  <section class="panel user-settings-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Cambiar contraseña</h2>
     </div>
 
-    <form method="post" action="{{ url_for('cambiar_password') }}" class="form">
+    <form method="post" action="{{ url_for('cambiar_password') }}" class="form user-settings-form">
       <div class="grid-2">
         <div>
           <label class="label">Contraseña actual</label>
@@ -38,12 +38,12 @@
   </section>
 
   {% if is_admin %}
-  <section class="panel">
+  <section class="panel user-settings-panel">
     <div class="section-head compact-head">
       <h2 class="section-heading">Alta de usuarios</h2>
     </div>
 
-    <form method="post" action="{{ url_for('crear_usuario') }}" class="form">
+    <form method="post" action="{{ url_for('crear_usuario') }}" class="form user-settings-form">
       <div class="grid-2">
         <div>
           <label class="label">Usuario</label>
@@ -54,7 +54,7 @@
           <input class="input" type="password" name="password" required>
         </div>
       </div>
-      <div class="grid-2">
+      <div class="grid-2 user-settings-role-row">
         <div>
           <label class="label">Rol</label>
           <select name="rol">
@@ -72,12 +72,12 @@
 </div>
 
 {% if is_admin %}
-<section class="panel table-card">
+<section class="panel table-card user-settings-table-card">
   <div class="section-head compact-head">
     <h2 class="section-heading">Usuarios registrados</h2>
   </div>
 
-  <div class="inv-scrollbox" style="max-height:52vh;">
+  <div class="inv-scrollbox user-settings-table-box">
     <table class="table">
       <thead>
         <tr>

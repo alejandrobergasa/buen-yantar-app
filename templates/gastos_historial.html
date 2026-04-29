@@ -54,7 +54,7 @@
             </div>
           </td>
           <td>{{ (row.fecha or "")[:10] }}</td>
-          <td>{{ row.categoria_label }}</td>
+          <td>{{ emoji_text(row.categoria_label) }}</td>
           <td>{{ row.descripcion }}</td>
           <td>{{ row.usuario or "-" }}</td>
           <td class="right">{{ row.importe }} €</td>

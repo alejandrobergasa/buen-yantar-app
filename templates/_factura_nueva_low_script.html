@@ -35,9 +35,15 @@
   const searchBox = document.getElementById("invoiceSearch");
   const groupFilter = document.getElementById("invoiceGroup");
   const invoiceFiltersForm = document.getElementById("invoiceFiltersForm");
-  const productRows = Array.from(document.querySelectorAll(".invoice-product-row"));
+  let productRows = Array.from(document.querySelectorAll(".invoice-product-row"));
   const invoiceProductsTbody = document.getElementById("invoiceProductsTbody");
   const noResultsBox = document.getElementById("invoiceNoResults");
+  const invoiceBrowserSummary = document.getElementById("invoiceBrowserSummary");
+  const invoiceBrowserActions = document.getElementById("invoiceBrowserActions");
+  const invoicePageInfo = document.getElementById("invoicePageInfo");
+  const invoiceClearFilters = document.getElementById("invoiceClearFilters");
+  const invoiceFilterLoading = document.getElementById("invoiceFilterLoading");
+  const productsBox = document.querySelector(".purchase-products-box");
   const invoiceLines = document.getElementById("invoiceLines");
   const invoiceEmpty = document.getElementById("invoiceEmpty");
   const rowTpl = document.getElementById("invoiceRowTpl");
@@ -55,12 +61,13 @@
   const selectedById = new Map();
   const draftKey = "buen-yantar:invoice-draft:low:v1";
   let invoiceConfirmAccepted = false;
+  let invoiceFetchToken = 0;
 
   function productDataFromRow(sourceRow) {
     return {
       pid: sourceRow.dataset.productId,
       name: sourceRow.dataset.name || "",
-      emoji: sourceRow.dataset.emoji || "📦",
+      emoji: sourceRow.dataset.emoji || "package",
       stockUnit: sourceRow.dataset.stockUnit || "ud",
       saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
       fractional: sourceRow.dataset.fraccionable === "1",
@@ -81,8 +88,8 @@
       },
       lines: Array.from(invoiceLines.querySelectorAll(".invoice-row")).map((row) => ({
         pid: row.querySelector(".ticket-product-id").value || "",
-        name: row.querySelector(".ticket-product-name")?.textContent?.replace(/^[^\s]+\s/, "") || "",
-        emoji: row.querySelector(".ticket-product-name")?.textContent?.trim().split(/\s+/)[0] || "📦",
+        name: row.querySelector(".ticket-product-name .emoji-text")?.textContent?.trim() || row.querySelector(".ticket-product-name")?.textContent?.trim() || "",
+        emoji: row.dataset.emoji || "package",
         stockUnit: row.dataset.stockUnit || "ud",
         saleUnit: row.dataset.saleUnit || "ud",
         fractional: row.dataset.fractional === "1",
@@ -260,12 +267,15 @@
     const row = rowTpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ticket-product-id").value = data.pid;
     row.querySelector(".ticket-product-price").value = data.defaultPrice || "0";
-    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    window.BYEmoji.setInline(row.querySelector(".ticket-product-name"), data.emoji, data.name, {
+      className: "emoji-icon emoji-inline",
+    });
     row.querySelector(".ticket-product-meta").textContent = data.fractional
       ? `Venta en ${data.saleUnit} · ${data.fractions} ${data.saleUnit} por ${data.stockUnit}`
       : `Unidad de venta: ${data.saleUnit}`;
     row.querySelector('input[name="cantidad[]"]').value = "1";
     row.querySelector(".js-line-price").textContent = `${(parseNumber(data.defaultPrice) || 0).toFixed(2)} €`;
+    row.dataset.emoji = data.emoji || "package";
     row.dataset.saleUnit = data.saleUnit || "ud";
 
     invoiceLines.appendChild(row);
@@ -319,6 +329,137 @@
     if (hiddenFG) hiddenFG.value = (groupFilter && groupFilter.value || "").trim();
   }
 
+  function setInvoiceLoading(isLoading) {
+    if (invoiceFilterLoading) invoiceFilterLoading.hidden = !isLoading;
+  }
+
+  function buildInvoiceProductRow(item) {
+    const tr = document.createElement("tr");
+    tr.className = "row-click invoice-product-row";
+    tr.dataset.productId = item.producto_id || "";
+    tr.dataset.name = item.nombre || "";
+    tr.dataset.group = item.grupo || "";
+    tr.dataset.stockUnit = item.unidad_stock || "ud";
+    tr.dataset.saleUnit = item.unidad_venta || item.unidad_stock || "ud";
+    tr.dataset.emoji = item.grupo_emoji || "package";
+    tr.dataset.inf = item.stock_infinito || "0";
+    tr.dataset.fraccionable = item.fraccionable || "0";
+    tr.dataset.fractions = item.fracciones_por_unidad || "1";
+    tr.dataset.price = item.precio_unitario || "0";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Anadir ${item.nombre || "producto"} a la factura`);
+
+    const left = document.createElement("td");
+    const head = document.createElement("div");
+    head.className = "product-row-head";
+    const name = document.createElement("span");
+    name.className = "product-name";
+    window.BYEmoji.setInline(name, item.grupo_emoji || "package", item.nombre || "", {
+      className: "emoji-icon emoji-inline",
+    });
+    const state = document.createElement("span");
+    state.className = `product-state ${item.stock_infinito === "1" ? "state-inf" : (item.stock_negative === "1" ? "state-negative" : (item.stock_zero === "1" ? "state-zero" : (item.stock_bajo === "1" ? "state-low" : "state-ok")))}`;
+    state.textContent = item.stock_infinito === "1" ? "INF" : (item.stock_negative === "1" ? "NEG" : (item.stock_zero === "1" ? "0" : (item.stock_bajo === "1" ? "BAJO" : "OK")));
+    head.append(name, state);
+    left.appendChild(head);
+    if (item.fraccionable === "1" && item.fraccion_info) {
+      const sub = document.createElement("div");
+      sub.className = "help product-subtext";
+      sub.textContent = `Venta en ${item.unidad_venta} · ${item.fraccion_info}`;
+      left.appendChild(sub);
+    }
+
+    const right = document.createElement("td");
+    right.className = "right";
+    if (item.stock_infinito === "1") {
+      right.appendChild(window.BYEmoji.createImage("infinity", { alt: "Stock infinito", className: "emoji-icon" }));
+    } else {
+      const main = document.createElement("div");
+      main.className = "stock-display-main";
+      main.textContent = item.stock_display_main || "";
+      right.appendChild(main);
+      if (item.stock_display_meta) {
+        const meta = document.createElement("div");
+        meta.className = "stock-display-meta";
+        meta.textContent = item.stock_display_meta;
+        right.appendChild(meta);
+      }
+    }
+
+    tr.append(left, right);
+    return tr;
+  }
+
+    function updateInvoicePagination(browser, summary) {
+      if (invoiceBrowserSummary) invoiceBrowserSummary.textContent = summary || "";
+      if (!invoiceBrowserActions || !invoicePageInfo) return;
+      invoiceBrowserActions.hidden = !(browser.page_count > 1);
+      invoiceBrowserActions.replaceChildren();
+      if (!(browser.page_count > 1)) return;
+
+      const prevControl = browser.has_prev ? document.createElement("a") : document.createElement("span");
+      prevControl.id = "invoicePrevPage";
+      prevControl.className = "btn btn-secondary btn-small";
+      prevControl.textContent = "Anterior";
+      if (browser.has_prev) {
+        prevControl.href = browser.prev_url || "#";
+      } else {
+        prevControl.setAttribute("aria-disabled", "true");
+      }
+
+      invoicePageInfo.textContent = `Página ${browser.page || 1} de ${browser.page_count || 1}`;
+
+      const nextControl = browser.has_next ? document.createElement("a") : document.createElement("span");
+      nextControl.id = "invoiceNextPage";
+      nextControl.className = "btn btn-secondary btn-small";
+      nextControl.textContent = "Siguiente";
+      if (browser.has_next) {
+        nextControl.href = browser.next_url || "#";
+      } else {
+        nextControl.setAttribute("aria-disabled", "true");
+      }
+
+      invoiceBrowserActions.append(prevControl, invoicePageInfo, nextControl);
+    }
+
+  async function fetchInvoiceProducts(targetUrl = null) {
+    if (!invoiceFiltersForm || !invoiceProductsTbody) return;
+    const scrollTop = productsBox ? productsBox.scrollTop : 0;
+    const url = new URL(targetUrl || invoiceFiltersForm.action, window.location.origin);
+    url.searchParams.set("q", searchBox ? searchBox.value.trim() : "");
+    url.searchParams.set("g", groupFilter ? groupFilter.value.trim() : "");
+    url.searchParams.set("format", "json");
+
+    const token = ++invoiceFetchToken;
+    setInvoiceLoading(true);
+    try {
+      const response = await fetch(url.toString(), {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudieron actualizar los productos.");
+      }
+      if (token !== invoiceFetchToken) return;
+
+      invoiceProductsTbody.replaceChildren();
+      (payload.items || []).forEach((item) => {
+        invoiceProductsTbody.appendChild(buildInvoiceProductRow(item));
+      });
+      productRows = Array.from(invoiceProductsTbody.querySelectorAll(".invoice-product-row"));
+      syncSelectedState();
+      if (noResultsBox) noResultsBox.hidden = (payload.items || []).length !== 0;
+      updateInvoicePagination(payload.browser || {}, payload.summary || "");
+      applyProductFilters();
+      if (productsBox) productsBox.scrollTop = scrollTop;
+    } catch (error) {
+      console.error(error);
+    } finally {
+      if (token === invoiceFetchToken) setInvoiceLoading(false);
+    }
+  }
+
   if (invoiceProductsTbody) {
     invoiceProductsTbody.addEventListener("click", (event) => {
       const row = event.target.closest(".invoice-product-row");
@@ -337,13 +478,36 @@
   if (invoiceFiltersForm) {
     const submitFilters = debounce(() => {
       saveDraft();
-      invoiceFiltersForm.requestSubmit();
+      fetchInvoiceProducts();
     }, 180);
+    invoiceFiltersForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveDraft();
+      fetchInvoiceProducts();
+    });
     if (searchBox) searchBox.addEventListener("input", submitFilters);
     if (groupFilter) groupFilter.addEventListener("change", () => {
       saveDraft();
-      invoiceFiltersForm.requestSubmit();
+      fetchInvoiceProducts();
     });
+    if (invoiceClearFilters) {
+      invoiceClearFilters.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (searchBox) searchBox.value = "";
+        if (groupFilter) groupFilter.value = "";
+        saveDraft();
+        fetchInvoiceProducts();
+      });
+    }
+    if (invoiceBrowserActions) {
+      invoiceBrowserActions.addEventListener("click", (event) => {
+        const link = event.target.closest("a[href]");
+        if (!link) return;
+        event.preventDefault();
+        saveDraft();
+        fetchInvoiceProducts(link.href);
+      });
+    }
   } else {
     if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
     if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
@@ -424,7 +588,7 @@
           const baseData = sourceRow ? productDataFromRow(sourceRow) : {
             pid: line.pid,
             name: line.name || line.pid,
-            emoji: line.emoji || "📦",
+            emoji: line.emoji || "package",
             stockUnit: line.stockUnit || "ud",
             saleUnit: line.saleUnit || line.stockUnit || "ud",
             fractional: Boolean(line.fractional),

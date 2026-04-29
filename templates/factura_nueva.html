@@ -14,12 +14,12 @@
         <select id="invoiceGroup" name="g">
           <option value="">(Todos)</option>
           {% for g, e in group_options %}
-            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ g }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="actions">
-        <a class="btn btn-secondary btn-small" href="{{ url_for('nueva_factura') }}">Limpiar</a>
+        <a class="btn btn-secondary btn-small" href="{{ url_for('nueva_factura') }}" id="invoiceClearFilters">Limpiar</a>
       </div>
     </form>
     {% else %}
@@ -33,7 +33,7 @@
         <select id="invoiceGroup">
           <option value="">(Todos)</option>
           {% for g, e in group_options %}
-            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ e }} {{ g }}</option>
+            <option value="{{ g }}" {% if current_filters.g == g %}selected{% endif %}>{{ g }}</option>
           {% endfor %}
         </select>
       </div>
@@ -68,7 +68,7 @@
             >
               <td>
                 <div class="product-row-head">
-                  <span class="product-name">{{ p.grupo_emoji }} {{ p.nombre }}</span>
+                  <span class="product-name">{{ emoji_icon(p.grupo_emoji, alt=p.nombre, class_name="emoji-inline") }}<span>{{ p.nombre }}</span></span>
                   {% if p.stock_infinito == "1" %}
                     <span class="product-state state-inf">INF</span>
                   {% elif p.stock_negative == "1" %}
@@ -87,7 +87,7 @@
               </td>
               <td class="right">
                 {% if p.stock_infinito == "1" %}
-                  ♾️
+                  {{ emoji_icon("infinity", alt="Stock infinito") }}
                 {% else %}
                   <div class="stock-display-main">{{ p.stock_display_main }}</div>
                   {% if not low_resource_mode and p.stock_display_meta %}
@@ -101,29 +101,28 @@
       </table>
       <div class="empty inventory-no-results" id="invoiceNoResults" hidden>No hay productos que coincidan con el filtro.</div>
     </div>
+    <div class="help list-loading-state" id="invoiceFilterLoading" hidden>Actualizando productos...</div>
     {% if low_resource_mode %}
-    <div class="help">
+    <div class="help" id="invoiceBrowserSummary">
       {% if product_browser.total %}
         Mostrando {{ product_browser.shown_from }}-{{ product_browser.shown_to }} de {{ product_browser.total }} productos.
       {% else %}
         No hay productos que coincidan con el filtro.
       {% endif %}
     </div>
-    {% if product_browser.page_count > 1 %}
-    <div class="actions">
+    <div class="actions" id="invoiceBrowserActions" {% if product_browser.page_count <= 1 %}hidden{% endif %}>
       {% if product_browser.has_prev %}
-        <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}">Anterior</a>
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.prev_url }}" id="invoicePrevPage">Anterior</a>
       {% else %}
-        <span class="btn btn-secondary btn-small" aria-disabled="true">Anterior</span>
+        <span class="btn btn-secondary btn-small" aria-disabled="true" id="invoicePrevPage">Anterior</span>
       {% endif %}
-      <span class="help">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
+      <span class="help" id="invoicePageInfo">Página {{ product_browser.page }} de {{ product_browser.page_count }}</span>
       {% if product_browser.has_next %}
-        <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}">Siguiente</a>
+        <a class="btn btn-secondary btn-small" href="{{ product_browser.next_url }}" id="invoiceNextPage">Siguiente</a>
       {% else %}
-        <span class="btn btn-secondary btn-small" aria-disabled="true">Siguiente</span>
+        <span class="btn btn-secondary btn-small" aria-disabled="true" id="invoiceNextPage">Siguiente</span>
       {% endif %}
     </div>
-    {% endif %}
     {% endif %}
   </section>
 
@@ -314,7 +313,7 @@
     return {
       pid: sourceRow.dataset.productId,
       name: sourceRow.dataset.name || "",
-      emoji: sourceRow.dataset.emoji || "📦",
+      emoji: sourceRow.dataset.emoji || "package",
       group: sourceRow.dataset.group || "Otros",
       stockUnit: sourceRow.dataset.stockUnit || "ud",
       saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
@@ -380,12 +379,15 @@
     const row = rowTpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ticket-product-id").value = data.pid;
     row.querySelector(".ticket-product-price").value = data.price ?? data.defaultPrice ?? "0";
-    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    window.BYEmoji.setInline(row.querySelector(".ticket-product-name"), data.emoji, data.name, {
+      className: "emoji-icon emoji-inline",
+    });
     row.querySelector(".ticket-product-meta").textContent = data.fractional
       ? `Venta en ${data.saleUnit} · Descuenta 1/${data.fractions} ${data.stockUnit}`
       : `Unidad de venta: ${data.saleUnit}`;
     row.querySelector('input[name="cantidad[]"]').value = data.qty ?? "1";
     row.querySelector(".js-line-price").textContent = `${(parseNumber(data.price ?? data.defaultPrice ?? "0") ?? 0).toFixed(2)} €`;
+    row.dataset.emoji = data.emoji || "package";
     row.dataset.saleUnit = data.saleUnit || "ud";
     row.dataset.stockUnit = data.stockUnit || "ud";
     row.dataset.fractional = data.fractional ? "1" : "0";

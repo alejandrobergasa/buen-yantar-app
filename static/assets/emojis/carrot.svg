@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Verduras">
+  <path d="M19 15c4-5 10-7 16-6-1 6-5 11-12 13z" fill="#4e9a43"/>
+  <path d="M29 13c5-4 10-4 16-2-3 5-8 8-15 8z" fill="#67b24d"/>
+  <path d="M28 18c7 9 9 24 4 38-1 3-4 5-7 4-10-4-16-24 3-42z" fill="#f28b2a"/>
+  <path d="M24 32l8 3M22 41l7 3" stroke="#d96d17" stroke-width="3" stroke-linecap="round"/>
+</svg>

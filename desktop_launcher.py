@@ -9,6 +9,7 @@ import tempfile
 import time
 import ctypes
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -72,7 +73,13 @@ def resolve_browser() -> Path:
     )
 
 
-def launch_browser(browser_path: Path, url: str, profile_dir: Path) -> subprocess.Popen[str]:
+def launcher_target_url(url: str) -> str:
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["launcher"] = "1"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+def launch_browser(browser_path: Path, target_url: str, profile_dir: Path) -> subprocess.Popen[str]:
     browser_name = browser_path.name.lower()
     common_flags = ["--no-first-run", "--disable-extensions"]
 
@@ -80,15 +87,17 @@ def launch_browser(browser_path: Path, url: str, profile_dir: Path) -> subproces
         command = [
             str(browser_path),
             "-new-instance",
+            "-new-window",
             "-profile",
             str(profile_dir),
-            url,
+            target_url,
         ]
     else:
         command = [
             str(browser_path),
-            f"--app={url}",
+            f"--app={target_url}",
             f"--user-data-dir={profile_dir}",
+            "--start-fullscreen",
             "--start-maximized",
             "--disable-background-networking",
             "--disable-component-update",
@@ -149,8 +158,12 @@ def main() -> int:
     env = env_with_defaults()
     host = env["HOST"]
     port = int(env["PORT"])
-    url = f"http://{host}:{port}"
-    browser_profile_dir = Path(tempfile.mkdtemp(prefix="buen_yantar_browser_"))
+    url = launcher_target_url(f"http://{host}:{port}")
+    launcher_dir = Path(tempfile.mkdtemp(prefix="buen_yantar_launcher_"))
+    browser_profile_dir = launcher_dir / "browser_profile"
+    browser_profile_dir.mkdir(parents=True, exist_ok=True)
+    exit_signal_path = launcher_dir / "close.signal"
+    env["LAUNCHER_EXIT_SIGNAL"] = str(exit_signal_path)
 
     server_process = subprocess.Popen(
         [sys.executable, "run_production.py"],
@@ -164,7 +177,11 @@ def main() -> int:
         browser_path = resolve_browser()
         browser_process = launch_browser(browser_path, url, browser_profile_dir)
         maximize_browser_window(browser_process)
-        browser_process.wait()
+        while browser_process.poll() is None:
+            if exit_signal_path.exists():
+                stop_process(browser_process, timeout=4.0)
+                return 0
+            time.sleep(0.2)
         return 0
     except KeyboardInterrupt:
         return 130
@@ -175,7 +192,7 @@ def main() -> int:
         if browser_process and browser_process.poll() is None:
             stop_process(browser_process, timeout=4.0)
         stop_process(server_process)
-        shutil.rmtree(browser_profile_dir, ignore_errors=True)
+        shutil.rmtree(launcher_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -57,9 +57,15 @@
   const searchBox = document.getElementById("purchaseSearch");
   const groupFilter = document.getElementById("purchaseGroup");
   const purchaseFiltersForm = document.getElementById("purchaseFiltersForm");
-  const productRows = Array.from(document.querySelectorAll(".purchase-product-row"));
+  let productRows = Array.from(document.querySelectorAll(".purchase-product-row"));
   const purchaseProductsTbody = document.getElementById("productsPickTbody");
   const noResultsBox = document.getElementById("purchaseNoResults");
+  const purchaseBrowserSummary = document.getElementById("purchaseBrowserSummary");
+  const purchaseBrowserActions = document.getElementById("purchaseBrowserActions");
+  const purchasePageInfo = document.getElementById("purchasePageInfo");
+  const purchaseClearFilters = document.getElementById("purchaseClearFilters");
+  const purchaseFilterLoading = document.getElementById("purchaseFilterLoading");
+  const productsBox = document.querySelector(".purchase-products-box");
   const purchaseLines = document.getElementById("purchaseLines");
   const purchaseEmpty = document.getElementById("purchaseEmpty");
   const rowTpl = document.getElementById("ticketRowTpl");
@@ -78,12 +84,13 @@
   const selectedById = new Map();
   const draftKey = "buen-yantar:purchase-draft:low:v1";
   let purchaseConfirmAccepted = false;
+  let purchaseFetchToken = 0;
 
   function productDataFromRow(sourceRow) {
     return {
       pid: sourceRow.dataset.productId,
       name: sourceRow.dataset.name || "",
-      emoji: sourceRow.dataset.emoji || "📦",
+      emoji: sourceRow.dataset.emoji || "package",
       stockUnit: sourceRow.dataset.stockUnit || "ud",
       saleUnit: sourceRow.dataset.saleUnit || sourceRow.dataset.stockUnit || "ud",
       fractional: sourceRow.dataset.fraccionable === "1",
@@ -105,8 +112,8 @@
       },
       lines: Array.from(purchaseLines.querySelectorAll(".purchase-row")).map((row) => ({
         pid: row.querySelector(".ticket-product-id").value || "",
-        name: row.querySelector(".ticket-product-name")?.textContent?.replace(/^[^\s]+\s/, "") || "",
-        emoji: row.querySelector(".ticket-product-name")?.textContent?.trim().split(/\s+/)[0] || "📦",
+        name: row.querySelector(".ticket-product-name .emoji-text")?.textContent?.trim() || row.querySelector(".ticket-product-name")?.textContent?.trim() || "",
+        emoji: row.dataset.emoji || "package",
         stockUnit: row.dataset.stockUnit || "ud",
         saleUnit: row.dataset.saleUnit || "ud",
         fractional: row.dataset.fractional === "1",
@@ -457,7 +464,9 @@
   function appendPurchaseRow(data, options = {}) {
     const row = rowTpl.content.firstElementChild.cloneNode(true);
     row.querySelector(".ticket-product-id").value = data.pid;
-    row.querySelector(".ticket-product-name").textContent = `${data.emoji} ${data.name}`;
+    window.BYEmoji.setInline(row.querySelector(".ticket-product-name"), data.emoji, data.name, {
+      className: "emoji-icon emoji-inline",
+    });
     row.querySelector(".ticket-product-meta").textContent = data.fractional
       ? `Compra en ${data.stockUnit} · Venta en ${data.saleUnit} · ${data.fractions} ${data.saleUnit} por ${data.stockUnit}`
       : `Compra y venta en ${data.stockUnit}`;
@@ -466,6 +475,7 @@
     row.querySelector('input[name="subtotal_compra[]"]').value = data.subtotal || "";
     row.querySelector('input[name="precio_venta_actual[]"]').value = data.salePrice || "";
     row.querySelector('input[name="nota_linea[]"]').value = data.note || "";
+    row.dataset.emoji = data.emoji || "package";
     row.dataset.originalSalePrice = data.originalSalePrice || data.salePrice || "";
     row.dataset.stockUnit = data.stockUnit || "ud";
     row.dataset.saleUnit = data.saleUnit || data.stockUnit || "ud";
@@ -524,6 +534,137 @@
     if (hiddenFG) hiddenFG.value = (groupFilter && groupFilter.value || "").trim();
   }
 
+  function setPurchaseLoading(isLoading) {
+    if (purchaseFilterLoading) purchaseFilterLoading.hidden = !isLoading;
+  }
+
+  function buildPurchaseProductRow(item) {
+    const tr = document.createElement("tr");
+    tr.className = "row-click purchase-product-row";
+    tr.dataset.productId = item.producto_id || "";
+    tr.dataset.name = item.nombre || "";
+    tr.dataset.group = item.grupo || "";
+    tr.dataset.stockUnit = item.unidad_stock || "ud";
+    tr.dataset.saleUnit = item.unidad_venta || item.unidad_stock || "ud";
+    tr.dataset.emoji = item.grupo_emoji || "package";
+    tr.dataset.salePrice = item.precio_venta_actual || "";
+    tr.dataset.inf = item.stock_infinito || "0";
+    tr.dataset.fraccionable = item.fraccionable || "0";
+    tr.dataset.fractions = item.fracciones_por_unidad || "1";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Anadir ${item.nombre || "producto"} al ticket`);
+
+    const left = document.createElement("td");
+    const head = document.createElement("div");
+    head.className = "product-row-head";
+    const name = document.createElement("span");
+    name.className = "product-name";
+    window.BYEmoji.setInline(name, item.grupo_emoji || "package", item.nombre || "", {
+      className: "emoji-icon emoji-inline",
+    });
+    const state = document.createElement("span");
+    state.className = `product-state ${item.stock_infinito === "1" ? "state-inf" : (item.stock_negative === "1" ? "state-negative" : (item.stock_zero === "1" ? "state-zero" : (item.stock_bajo === "1" ? "state-low" : "state-ok")))}`;
+    state.textContent = item.stock_infinito === "1" ? "INF" : (item.stock_negative === "1" ? "NEG" : (item.stock_zero === "1" ? "0" : (item.stock_bajo === "1" ? "BAJO" : "OK")));
+    head.append(name, state);
+    left.appendChild(head);
+    if (item.fraccionable === "1" && item.fraccion_info) {
+      const sub = document.createElement("div");
+      sub.className = "help product-subtext";
+      sub.textContent = `Compra en ${item.unidad_stock} · Venta en ${item.unidad_venta} · ${item.fraccion_info}`;
+      left.appendChild(sub);
+    }
+
+    const right = document.createElement("td");
+    right.className = "right";
+    if (item.stock_infinito === "1") {
+      right.appendChild(window.BYEmoji.createImage("infinity", { alt: "Stock infinito", className: "emoji-icon" }));
+    } else {
+      const main = document.createElement("div");
+      main.className = "stock-display-main";
+      main.textContent = item.stock_display_main || "";
+      right.appendChild(main);
+      if (item.stock_display_meta) {
+        const meta = document.createElement("div");
+        meta.className = "stock-display-meta";
+        meta.textContent = item.stock_display_meta;
+        right.appendChild(meta);
+      }
+    }
+
+    tr.append(left, right);
+    return tr;
+  }
+
+    function updatePurchasePagination(browser, summary) {
+      if (purchaseBrowserSummary) purchaseBrowserSummary.textContent = summary || "";
+      if (!purchaseBrowserActions || !purchasePageInfo) return;
+      purchaseBrowserActions.hidden = !(browser.page_count > 1);
+      purchaseBrowserActions.replaceChildren();
+      if (!(browser.page_count > 1)) return;
+
+      const prevControl = browser.has_prev ? document.createElement("a") : document.createElement("span");
+      prevControl.id = "purchasePrevPage";
+      prevControl.className = "btn btn-secondary btn-small";
+      prevControl.textContent = "Anterior";
+      if (browser.has_prev) {
+        prevControl.href = browser.prev_url || "#";
+      } else {
+        prevControl.setAttribute("aria-disabled", "true");
+      }
+
+      purchasePageInfo.textContent = `Página ${browser.page || 1} de ${browser.page_count || 1}`;
+
+      const nextControl = browser.has_next ? document.createElement("a") : document.createElement("span");
+      nextControl.id = "purchaseNextPage";
+      nextControl.className = "btn btn-secondary btn-small";
+      nextControl.textContent = "Siguiente";
+      if (browser.has_next) {
+        nextControl.href = browser.next_url || "#";
+      } else {
+        nextControl.setAttribute("aria-disabled", "true");
+      }
+
+      purchaseBrowserActions.append(prevControl, purchasePageInfo, nextControl);
+    }
+
+  async function fetchPurchaseProducts(targetUrl = null) {
+    if (!purchaseFiltersForm || !purchaseProductsTbody) return;
+    const scrollTop = productsBox ? productsBox.scrollTop : 0;
+    const url = new URL(targetUrl || purchaseFiltersForm.action, window.location.origin);
+    url.searchParams.set("q", searchBox ? searchBox.value.trim() : "");
+    url.searchParams.set("g", groupFilter ? groupFilter.value.trim() : "");
+    url.searchParams.set("format", "json");
+
+    const token = ++purchaseFetchToken;
+    setPurchaseLoading(true);
+    try {
+      const response = await fetch(url.toString(), {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "No se pudieron actualizar los productos.");
+      }
+      if (token !== purchaseFetchToken) return;
+
+      purchaseProductsTbody.replaceChildren();
+      (payload.items || []).forEach((item) => {
+        purchaseProductsTbody.appendChild(buildPurchaseProductRow(item));
+      });
+      productRows = Array.from(purchaseProductsTbody.querySelectorAll(".purchase-product-row"));
+      syncSelectedState();
+      if (noResultsBox) noResultsBox.hidden = (payload.items || []).length !== 0;
+      updatePurchasePagination(payload.browser || {}, payload.summary || "");
+      applyProductFilters();
+      if (productsBox) productsBox.scrollTop = scrollTop;
+    } catch (error) {
+      console.error(error);
+    } finally {
+      if (token === purchaseFetchToken) setPurchaseLoading(false);
+    }
+  }
+
   if (purchaseProductsTbody) {
     purchaseProductsTbody.addEventListener("click", (event) => {
       const row = event.target.closest(".purchase-product-row");
@@ -542,13 +683,36 @@
   if (purchaseFiltersForm) {
     const submitFilters = debounce(() => {
       saveDraft();
-      purchaseFiltersForm.requestSubmit();
+      fetchPurchaseProducts();
     }, 180);
+    purchaseFiltersForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveDraft();
+      fetchPurchaseProducts();
+    });
     if (searchBox) searchBox.addEventListener("input", submitFilters);
     if (groupFilter) groupFilter.addEventListener("change", () => {
       saveDraft();
-      purchaseFiltersForm.requestSubmit();
+      fetchPurchaseProducts();
     });
+    if (purchaseClearFilters) {
+      purchaseClearFilters.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (searchBox) searchBox.value = "";
+        if (groupFilter) groupFilter.value = "";
+        saveDraft();
+        fetchPurchaseProducts();
+      });
+    }
+    if (purchaseBrowserActions) {
+      purchaseBrowserActions.addEventListener("click", (event) => {
+        const link = event.target.closest("a[href]");
+        if (!link) return;
+        event.preventDefault();
+        saveDraft();
+        fetchPurchaseProducts(link.href);
+      });
+    }
   } else {
     if (searchBox) searchBox.addEventListener("input", debounce(applyProductFilters, 120));
     if (groupFilter) groupFilter.addEventListener("change", applyProductFilters);
@@ -661,7 +825,7 @@
           const baseData = sourceRow ? productDataFromRow(sourceRow) : {
             pid: line.pid,
             name: line.name || line.pid,
-            emoji: line.emoji || "📦",
+            emoji: line.emoji || "package",
             stockUnit: line.stockUnit || "ud",
             saleUnit: line.saleUnit || line.stockUnit || "ud",
             fractional: Boolean(line.fractional),

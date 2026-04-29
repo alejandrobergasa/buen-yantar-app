@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Banco">
+  <path d="M12 24l20-12 20 12z" fill="#c8b37f"/>
+  <rect x="16" y="24" width="6" height="18" fill="#e7d7aa"/>
+  <rect x="29" y="24" width="6" height="18" fill="#e7d7aa"/>
+  <rect x="42" y="24" width="6" height="18" fill="#e7d7aa"/>
+  <path d="M12 46h40" stroke="#7a6a48" stroke-width="4" stroke-linecap="round"/>
+</svg>
