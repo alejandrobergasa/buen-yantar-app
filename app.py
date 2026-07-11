@@ -7,6 +7,7 @@ import io
 import json
 import math
 import os
+import sys
 import unicodedata
 from pathlib import Path
 import config
@@ -106,16 +107,31 @@ def create_app() -> Flask:
     ensure_app_settings(config.CSV_APP_SETTINGS, backup_dir=config.BACKUP_DIR)
     ensure_user_schema(config.CSV_USUARIOS, backup_dir=config.BACKUP_DIR)
     ensure_product_schema(config.CSV_PRODUCTOS, backup_dir=config.BACKUP_DIR)
-    ensure_group_catalog(
-        config.CSV_GRUPOS,
-        products_csv=config.CSV_PRODUCTOS,
-        backup_dir=config.BACKUP_DIR,
-    )
     ensure_cashbox(config.CSV_CAJA)
 
     ensure_default_admin(config.CSV_USUARIOS)
     if os.getenv("LOAD_DEMO_DATA", "0") == "1":
         ensure_demo_products(config.CSV_PRODUCTOS)
+
+    def sync_group_catalog_safe(
+        *,
+        products: list[dict[str, str]] | None = None,
+        products_csv: Path | None = None,
+    ) -> None:
+        try:
+            ensure_group_catalog(
+                config.CSV_GRUPOS,
+                products=products,
+                products_csv=products_csv,
+                backup_dir=config.BACKUP_DIR,
+            )
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudo sincronizar el catalogo de grupos: {exc}",
+                file=sys.stderr,
+            )
+
+    sync_group_catalog_safe(products_csv=config.CSV_PRODUCTOS)
 
     def emoji_url(filename: str) -> str:
         return url_for("static", filename=f"assets/emojis/{filename}")
@@ -129,6 +145,8 @@ def create_app() -> Flask:
             for key in EMOJI_PICKER_KEYS
             if key in assets_by_key
         ]
+        palette_css = Path(app.static_folder or "") / "home_menu_palette.css"
+        palette_css_mtime = int(palette_css.stat().st_mtime) if palette_css.exists() else 0
         return {
             "emoji_icon": lambda value, alt=None, class_name="": render_emoji_html(
                 value,
@@ -144,6 +162,7 @@ def create_app() -> Flask:
             "emoji_entry": get_emoji_entry,
             "emoji_picker_assets": picker_assets,
             "emoji_assets_json": json.dumps(assets, ensure_ascii=False),
+            "palette_css_mtime": palette_css_mtime,
         }
 
     def refresh_cash_analysis_storage(force: bool = False) -> dict[str, object]:
@@ -225,6 +244,8 @@ def create_app() -> Flask:
 
     @app.before_request
     def inject_user_context():
+        if (request.args.get("launcher") or "").strip() == "1":
+            session["launched_by_launcher"] = "1"
         u = current_user_row()
         g.current_user = u
         g.is_admin = is_admin(u)
@@ -341,6 +362,16 @@ def create_app() -> Flask:
         text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
         return "".join(text.lower().split())
 
+    def find_default_invoice_product(products: list[dict[str, str]]) -> dict[str, str] | None:
+        target_name = normalize_text_search("tasa por comensal")
+        for product in products:
+            if (
+                normalize_text_search(product.get("nombre", "")) == target_name
+                and (product.get("stock_infinito") or "").strip() == "1"
+            ):
+                return product
+        return None
+
     def parse_positive_int(raw: str | None, default: int, *, minimum: int = 1, maximum: int | None = None) -> int:
         try:
             value = int(str(raw or "").strip())
@@ -424,19 +455,39 @@ def create_app() -> Flask:
         sale_text = f"{format_compact_number(sale_qty)} {sale_unit_label(product)}"
         return (sale_text, stock_text)
 
+    def stored_group_name(raw: object) -> str:
+        return str(raw or "").strip()
+
+    def display_group_name(raw: object) -> str:
+        return stored_group_name(raw) or "Sin grupo"
+
+    def display_group_emoji(raw: object) -> str:
+        return str(raw or "").strip() or str(get_emoji_entry("question")["char"])
+
+    def normalize_group_filter_value(raw: object) -> str | None:
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        if value == "__ungrouped__":
+            return ""
+        return value
+
     def group_options_for_products(prods: list[dict[str, str]] | None = None) -> list[tuple[str, str]]:
-        ensure_group_catalog(
-            config.CSV_GRUPOS,
-            products=prods,
-            backup_dir=config.BACKUP_DIR,
-        )
-        return [
-            (
-                (row.get("nombre") or "Otros").strip() or "Otros",
-                (row.get("emoji") or "package").strip() or "package",
+        sync_group_catalog_safe(products=prods)
+        try:
+            return [
+                (
+                    stored_group_name(row.get("nombre")),
+                    (row.get("emoji") or "package").strip() or "package",
+                )
+                for row in list_groups(config.CSV_GRUPOS)
+            ]
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudieron leer los grupos configurados: {exc}",
+                file=sys.stderr,
             )
-            for row in list_groups(config.CSV_GRUPOS)
-        ]
+            return []
 
     def extract_note_value(note: str, prefix: str) -> str:
         for part in (note or "").split("|"):
@@ -611,19 +662,26 @@ def create_app() -> Flask:
 
     def admin_groups_context() -> dict[str, object]:
         products = get_products(config.CSV_PRODUCTOS)
-        ensure_group_catalog(
-            config.CSV_GRUPOS,
-            products=products,
-            backup_dir=config.BACKUP_DIR,
-        )
+        sync_group_catalog_safe(products=products)
         counts: dict[str, int] = {}
         for product in products:
-            group_name = (product.get("grupo") or "Otros").strip() or "Otros"
+            group_name = stored_group_name(product.get("grupo"))
+            if not group_name:
+                continue
             counts[group_name] = counts.get(group_name, 0) + 1
 
         groups = []
-        for row in list_groups(config.CSV_GRUPOS):
-            group_name = (row.get("nombre") or "Otros").strip() or "Otros"
+        try:
+            source_groups = list_groups(config.CSV_GRUPOS)
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudo construir la vista de grupos: {exc}",
+                file=sys.stderr,
+            )
+            source_groups = []
+
+        for row in source_groups:
+            group_name = stored_group_name(row.get("nombre"))
             groups.append({
                 **row,
                 "product_count": counts.get(group_name, 0),
@@ -651,7 +709,9 @@ def create_app() -> Flask:
         groups: set[str] = set()
 
         for p in prods:
-            groups.add((p.get("grupo") or "Otros").strip() or "Otros")
+            group_name = stored_group_name(p.get("grupo"))
+            if group_name:
+                groups.add(group_name)
             if p.get("stock_infinito", "0") == "1":
                 infinite += 1
                 continue
@@ -909,7 +969,7 @@ def create_app() -> Flask:
             if gap <= 0:
                 continue
             alerts.append({
-                "label": f"{product.get('grupo_emoji', '📦')} {product.get('nombre', '')}",
+                "label": f"{display_group_emoji(product.get('grupo_emoji'))} {product.get('nombre', '')}",
                 "meta": f"Actual {format_compact_number(current_stock)} · Minimo {format_compact_number(min_stock)}",
                 "value": f"Faltan {format_compact_number(gap)}",
                 "pct": 100.0 if min_stock <= 0 else min(100.0, round((gap / min_stock) * 100, 1)),
@@ -968,11 +1028,11 @@ def create_app() -> Flask:
         for line in filtered_invoice_lines:
             product_id = (line.get("producto_id") or "").strip()
             product = product_map.get(product_id, {})
-            label = f"{product.get('grupo_emoji', '📦')} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
+            label = f"{display_group_emoji(product.get('grupo_emoji'))} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
             qty = safe_float(line.get("cantidad"))
             amount = safe_float(line.get("importe_linea"))
-            group_name = (product.get("grupo") or "Otros").strip() or "Otros"
-            group_emoji = (product.get("grupo_emoji") or "📦").strip() or "📦"
+            group_name = display_group_name(product.get("grupo"))
+            group_emoji = display_group_emoji(product.get("grupo_emoji"))
 
             product_row = sales_by_product.setdefault(product_id or label, {
                 "label": label,
@@ -1001,11 +1061,11 @@ def create_app() -> Flask:
             for line in purchase_lines_map_all.get(ref_id, []):
                 product_id = (line.get("producto_id") or "").strip()
                 product = product_map.get(product_id, {})
-                label = f"{product.get('grupo_emoji', '📦')} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
+                label = f"{display_group_emoji(product.get('grupo_emoji'))} {line.get('producto_nombre', '') or product.get('nombre', product_id)}"
                 qty = safe_float(line.get("cantidad"))
                 amount = safe_float(line.get("importe_linea"))
-                group_name = (product.get("grupo") or "Otros").strip() or "Otros"
-                group_emoji = (product.get("grupo_emoji") or "📦").strip() or "📦"
+                group_name = display_group_name(product.get("grupo"))
+                group_emoji = display_group_emoji(product.get("grupo_emoji"))
 
                 product_row = spend_by_product.setdefault(product_id or label, {
                     "label": label,
@@ -1688,7 +1748,10 @@ def create_app() -> Flask:
     @app.get("/logout")
     def logout():
         g.audit_user = session.get("user", "") or "anon"
+        launched_by_launcher = session.get("launched_by_launcher")
         session.clear()
+        if launched_by_launcher == "1":
+            session["launched_by_launcher"] = "1"
         return redirect(url_for("login"))
 
     @app.get("/usuarios/gestion")
@@ -1975,19 +2038,40 @@ def create_app() -> Flask:
             flash("Grupo no válido.")
             return redirect_to_config("grupos")
 
-        in_use = any(
-            ((product.get("grupo") or "Otros").strip() or "Otros") == group_name
-            for product in get_products(config.CSV_PRODUCTOS)
-        )
-        if in_use:
-            flash("No puedes eliminar un grupo que todavía tiene productos. Reasígnalos antes.")
-            return redirect_to_config("grupos")
+        product_updates: dict[str, dict[str, str]] = {}
+        for product in get_products(config.CSV_PRODUCTOS):
+            if stored_group_name(product.get("grupo")) != group_name:
+                continue
+            product_updates[product["producto_id"]] = {
+                "grupo": "",
+                "grupo_emoji": str(get_emoji_entry("question")["char"]),
+            }
 
-        if not delete_group(config.CSV_GRUPOS, group_name=group_name, backup_dir=config.BACKUP_DIR):
-            flash("No se pudo eliminar el grupo.")
-            return redirect_to_config("grupos")
+        try:
+            if product_updates:
+                update_many_product_fields(
+                    config.CSV_PRODUCTOS,
+                    backup_dir=config.BACKUP_DIR,
+                    updates=product_updates,
+                )
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudieron dejar sin grupo algunos productos al eliminar grupo '{group_name}': {exc}",
+                file=sys.stderr,
+            )
 
-        flash("Grupo eliminado 🗑️")
+        try:
+            delete_group(config.CSV_GRUPOS, group_name=group_name, backup_dir=config.BACKUP_DIR)
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudo marcar como inactivo el grupo '{group_name}': {exc}",
+                file=sys.stderr,
+            )
+
+        if product_updates:
+            flash(f"Grupo eliminado 🗑️ Productos sin grupo: {len(product_updates)}")
+        else:
+            flash("Grupo eliminado 🗑️")
         return redirect_to_config("grupos")
 
     @app.get("/configuracion/migracion")
@@ -2210,8 +2294,8 @@ def create_app() -> Flask:
             product_summary = {
                 "producto_id": pid,
                 "nombre": p.get("nombre", ""),
-                "grupo": (p.get("grupo") or "Otros").strip() or "Otros",
-                "grupo_emoji": p.get("grupo_emoji", "📦"),
+                "grupo": display_group_name(p.get("grupo")),
+                "grupo_emoji": display_group_emoji(p.get("grupo_emoji")),
                 "stock_label": format_compact_number(current_stock),
                 "stock_minimo_label": format_compact_number(stock_min),
                 "low_stock": is_low_stock,
@@ -2492,7 +2576,7 @@ def create_app() -> Flask:
             stock_min = safe_float(product.get("stock_minimo"))
             items.append({
                 "nombre": product.get("nombre", ""),
-                "grupo_emoji": product.get("grupo_emoji", "📦"),
+                "grupo_emoji": display_group_emoji(product.get("grupo_emoji")),
                 "stock_actual": format_compact_number(current_stock),
                 "stock_seguridad": format_compact_number(stock_min),
             })
@@ -2520,6 +2604,7 @@ def create_app() -> Flask:
             "g": (request.args.get("g") or "").strip(),
             "low": "1" if (request.args.get("low") or "").strip() == "1" else "0",
         }
+        selected_group_filter = normalize_group_filter_value(current_filters["g"])
 
         prods = get_products(config.CSV_PRODUCTOS)
         stock_map = calc_stock_by_product(config.CSV_MOVS)
@@ -2528,8 +2613,8 @@ def create_app() -> Flask:
         low_stock_count = 0
         infinite_stock_count = 0
         for p in prods:
-            group_name = (p.get("grupo") or "Otros").strip() or "Otros"
-            group_emoji = (p.get("grupo_emoji") or "📦").strip() or "📦"
+            group_name = stored_group_name(p.get("grupo"))
+            group_emoji = display_group_emoji(p.get("grupo_emoji"))
 
             pid = p["producto_id"]
             infinito = (p.get("stock_infinito", "0") == "1")
@@ -2549,6 +2634,7 @@ def create_app() -> Flask:
                 "unidad": stock_unit_label(p),
                 "unidad_venta": sale_unit_label(p),
                 "grupo": group_name,
+                "grupo_label": display_group_name(group_name),
                 "grupo_emoji": group_emoji,
                 "stock_infinito": "1" if infinito else "0",
                 "fraccionable": "1" if product_is_fractionable(p) else "0",
@@ -2572,7 +2658,7 @@ def create_app() -> Flask:
             filtered_rows = [
                 row for row in rows
                 if (not query or query in normalize_text_search(row["nombre"]))
-                and (not group_name or row["grupo"] == group_name)
+                and (selected_group_filter is None or row["grupo"] == selected_group_filter)
                 and (not low_only or row["bajo_minimo"] == "1")
             ]
             visible_rows, product_browser = paginate_rows(
@@ -2710,16 +2796,19 @@ def create_app() -> Flask:
         grupo_select = (request.form.get("grupo_select") or "").strip()
 
         prods = get_products(config.CSV_PRODUCTOS)
-        ensure_group_catalog(
-            config.CSV_GRUPOS,
-            products=prods,
-            backup_dir=config.BACKUP_DIR,
-        )
-        groups_map = {
-            (row.get("nombre") or "Otros").strip() or "Otros":
-            str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
-            for row in list_groups(config.CSV_GRUPOS)
-        }
+        sync_group_catalog_safe(products=prods)
+        try:
+            groups_map = {
+                stored_group_name(row.get("nombre")):
+                str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
+                for row in list_groups(config.CSV_GRUPOS)
+            }
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudieron cargar los grupos al crear producto: {exc}",
+                file=sys.stderr,
+            )
+            groups_map = {}
 
         if grupo_select == "__new__":
             grupo = (request.form.get("grupo_custom") or "").strip()
@@ -2733,8 +2822,8 @@ def create_app() -> Flask:
             grupo_emoji_key = get_emoji_key(grupo_emoji_value)
             grupo_emoji = str(get_emoji_entry(grupo_emoji_key)["char"])
         else:
-            grupo = grupo_select or "Otros"
-            grupo_emoji = groups_map.get(grupo, str(get_emoji_entry("package")["char"]))
+            grupo = grupo_select
+            grupo_emoji = groups_map.get(grupo, str(get_emoji_entry("question")["char"]) if not grupo else str(get_emoji_entry("package")["char"]))
 
         if not nombre:
             flash("El nombre del producto es obligatorio.")
@@ -2782,12 +2871,13 @@ def create_app() -> Flask:
             fracciones_por_unidad=fracciones_por_unidad_clean,
             unidad_venta=unidad_venta,
         )
-        create_group(
-            config.CSV_GRUPOS,
-            group_name=grupo,
-            emoji=grupo_emoji_key if grupo_select == "__new__" else get_emoji_key(grupo_emoji),
-            backup_dir=config.BACKUP_DIR,
-        )
+        if grupo_select == "__new__":
+            create_group(
+                config.CSV_GRUPOS,
+                group_name=grupo,
+                emoji=grupo_emoji_key,
+                backup_dir=config.BACKUP_DIR,
+            )
         if stock_actual_value is not None:
             set_stock_to_value(config.CSV_MOVS, pid, desired_stock=stock_actual_value)
 
@@ -2819,16 +2909,19 @@ def create_app() -> Flask:
         legacy_grupo_emoji = (request.form.get("grupo_emoji") or "").strip()
 
         prods = get_products(config.CSV_PRODUCTOS)
-        ensure_group_catalog(
-            config.CSV_GRUPOS,
-            products=prods,
-            backup_dir=config.BACKUP_DIR,
-        )
-        groups_map = {
-            (row.get("nombre") or "Otros").strip() or "Otros":
-            str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
-            for row in list_groups(config.CSV_GRUPOS)
-        }
+        sync_group_catalog_safe(products=prods)
+        try:
+            groups_map = {
+                stored_group_name(row.get("nombre")):
+                str(get_emoji_entry((row.get("emoji") or "package").strip() or "package")["char"])
+                for row in list_groups(config.CSV_GRUPOS)
+            }
+        except Exception as exc:
+            print(
+                f"[BuenYantar] Aviso: no se pudieron cargar los grupos al editar producto: {exc}",
+                file=sys.stderr,
+            )
+            groups_map = {}
 
         if grupo_select == "__new__":
             grupo = (request.form.get("grupo_custom") or "").strip()
@@ -2842,10 +2935,10 @@ def create_app() -> Flask:
             grupo_emoji_key = get_emoji_key(grupo_emoji_value)
             grupo_emoji = str(get_emoji_entry(grupo_emoji_key)["char"])
         else:
-            grupo = grupo_select or legacy_grupo or "Otros"
+            grupo = grupo_select if grupo_select != "" else ""
             grupo_emoji = groups_map.get(
                 grupo,
-                str(get_emoji_entry(get_emoji_key(legacy_grupo_emoji or "package"))["char"]),
+                str(get_emoji_entry("question")["char"]) if not grupo else str(get_emoji_entry(get_emoji_key(legacy_grupo_emoji or "package"))["char"]),
             )
             grupo_emoji_key = get_emoji_key(grupo_emoji)
 
@@ -2897,12 +2990,13 @@ def create_app() -> Flask:
                 "unidad_venta": unidad_venta,
             },
         )
-        create_group(
-            config.CSV_GRUPOS,
-            group_name=grupo,
-            emoji=grupo_emoji_key,
-            backup_dir=config.BACKUP_DIR,
-        )
+        if grupo_select == "__new__":
+            create_group(
+                config.CSV_GRUPOS,
+                group_name=grupo,
+                emoji=grupo_emoji_key,
+                backup_dir=config.BACKUP_DIR,
+            )
         if stock_actual_value is not None:
             set_stock_to_value(config.CSV_MOVS, producto_id, desired_stock=stock_actual_value)
 
@@ -2949,8 +3043,8 @@ def create_app() -> Flask:
             sale_unit = sale_unit_label(p)
             infinito = (p.get("stock_infinito", "0") == "1")
             current_stock = None if infinito else stock_map.get(pid, 0.0)
-            group_name = p.get("grupo", "Otros")
-            group_emoji = p.get("grupo_emoji", "📦")
+            group_name = stored_group_name(p.get("grupo"))
+            group_emoji = display_group_emoji(p.get("grupo_emoji"))
             stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
             product_options.append({
                 "producto_id": pid,
@@ -2994,6 +3088,20 @@ def create_app() -> Flask:
             visible_product_options = filtered_product_options
             product_browser = simple_browser_state("nueva_factura", current_filters, len(filtered_product_options))
 
+        default_invoice_product_row = find_default_invoice_product(prods)
+        default_invoice_product = None
+        if default_invoice_product_row:
+            default_invoice_product = {
+                "pid": default_invoice_product_row.get("producto_id", ""),
+                "name": default_invoice_product_row.get("nombre", ""),
+                "emoji": default_invoice_product_row.get("grupo_emoji", "") or "package",
+                "stockUnit": stock_unit_label(default_invoice_product_row),
+                "saleUnit": sale_unit_label(default_invoice_product_row),
+                "fractional": product_is_fractionable(default_invoice_product_row),
+                "fractions": format_compact_number(product_fraction_count(default_invoice_product_row)),
+                "defaultPrice": default_invoice_product_row.get("precio_unitario", "") or "0",
+            }
+
         if is_partial_json_request():
             return jsonify({
                 "ok": True,
@@ -3013,6 +3121,7 @@ def create_app() -> Flask:
             today_iso=date.today().isoformat(),
             current_filters=current_filters,
             product_browser=product_browser,
+            default_invoice_product=default_invoice_product,
             form_summary={
                 "total_products": len(product_options),
                 "groups": len(group_options),
@@ -3565,8 +3674,8 @@ def create_app() -> Flask:
             sale_unit = sale_unit_label(p)
             infinito = (p.get("stock_infinito", "0") == "1")
             current_stock = None if infinito else stock_map.get(pid, 0.0)
-            group_name = p.get("grupo", "Otros")
-            group_emoji = p.get("grupo_emoji", "📦")
+            group_name = stored_group_name(p.get("grupo"))
+            group_emoji = display_group_emoji(p.get("grupo_emoji"))
             stock_display_main, stock_display_meta = stock_display_parts(p, current_stock)
             product_options.append({
                 "producto_id": pid,

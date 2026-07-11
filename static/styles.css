@@ -354,7 +354,6 @@ body.performance-low .topbar {
 }
 
 body.performance-low .panel,
-body.performance-low .action-card,
 body.performance-low .shopping-dialog-shell,
 body.performance-low .stat-card,
 body.performance-low .analysis-card,
@@ -562,14 +561,34 @@ select.field-invalid:focus {
 }
 
 .btn-secondary {
-  background: #ffffff;
-  color: var(--text);
+  background: #edf4f0;
+  color: #29433c;
   border-color: #c7d6cf;
 }
 
 .btn-secondary:hover {
-  background: #f5faf8;
+  background: #e2ece7;
   border-color: #abc4bb;
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-accent:hover {
+  background: #093b6c;
+  transform: translateY(-1px);
+}
+
+.btn-danger {
+  background: #b63a3a;
+  color: #ffffff;
+}
+
+.btn-danger:hover {
+  background: #942c2c;
+  transform: translateY(-1px);
 }
 
 .actions {
@@ -2804,6 +2823,10 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.home-action-grid-operativa-admin {
+  grid-template-columns: minmax(0, 1.22fr) repeat(2, minmax(0, 1fr));
+}
+
 .home-action-grid-secondary {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2816,19 +2839,126 @@ body {
   align-items: center;
   gap: 0.6rem;
   aspect-ratio: 1 / 0.82;
-  min-height: 8.55rem;
+  min-height: 13.5rem;
   padding: 0.78rem;
+  border-width: 1px;
+  border-style: solid;
+  box-shadow:
+    var(--shadow-soft);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.home-clean-layout-admin .home-menu-card {
+  min-height: 8.25rem;
 }
 
 .home-menu-card h2 {
   margin: 0;
   max-width: 9ch;
   line-height: 1.12;
+  font-size: clamp(1.18rem, 1.7vw, 1.48rem);
+}
+
+.home-menu-card:hover,
+.home-menu-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 26px rgba(23, 32, 38, 0.12);
+}
+
+.home-menu-card-sales {
+  background: #db9648;
+  border-color: #bc782e;
+  color: #6e430c;
+}
+
+.home-action-grid-operativa-admin .home-menu-card-sales {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-height: 28rem;
+}
+
+.home-clean-layout-admin .home-action-grid-operativa-admin .home-menu-card-sales {
+  min-height: 16.5rem;
+}
+
+.home-menu-card-purchases {
+  background: #e7aa61;
+  border-color: #c9853f;
+  color: #6d4310;
+}
+
+.home-action-grid-operativa-admin .home-menu-card-purchases {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.home-menu-card-expenses {
+  background: #f2bd79;
+  border-color: #d4954d;
+  color: #6a3d0a;
+}
+
+.home-action-grid-operativa-admin .home-menu-card-expenses {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.home-menu-card-inventory {
+  background: #f9cf9b;
+  border-color: #d8a56a;
+  color: #6b4510;
+}
+
+.home-action-grid-operativa-admin .home-menu-card-inventory {
+  grid-column: 2 / span 2;
+  grid-row: 2;
+}
+
+.home-menu-card-history-sales {
+  background: #6faee2;
+  border-color: #4687bd;
+  color: #24476f;
+}
+
+.home-menu-card-history-purchases {
+  background: #8fc3f1;
+  border-color: #5b95c8;
+  color: #23486f;
+}
+
+.home-menu-card-history-expenses {
+  background: #b9dcff;
+  border-color: #79a9d8;
+  color: #24486d;
+}
+
+.home-menu-card-user {
+  background: #dbeeff;
+  border-color: #99bcdf;
+  color: #29486d;
+}
+
+.home-menu-card-settings {
+  background: #d3d3d3;
+  border-color: #adadad;
+  color: #474747;
+}
+
+.home-menu-card-analytics {
+  background: #ededed;
+  border-color: #c5c5c5;
+  color: #4b4b4b;
 }
 
 .home-menu-emoji {
   display: block;
-  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-size: clamp(4.4rem, 6.6vw, 6.1rem);
+  width: clamp(4.8rem, 7vw, 6.6rem);
+  height: clamp(4.8rem, 7vw, 6.6rem);
   line-height: 1;
 }
 
@@ -2839,12 +2969,27 @@ body {
 }
 
 .home-side-panels-single {
-  align-content: start;
-  grid-template-rows: auto auto;
+  align-content: stretch;
+}
+
+.home-side-panels-admin {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.home-side-panels-stock-only {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .home-side-panel-stock {
   min-height: 18.5rem;
+}
+
+.home-side-panels-stock-only .home-side-panel-stock {
+  min-height: 0;
+}
+
+.home-side-panel-cash {
+  flex: 0 0 auto;
 }
 
 .home-mini-stats {
@@ -2897,6 +3042,14 @@ body {
 .cash-balance-card span {
   color: var(--muted);
   font-weight: 700;
+}
+
+.home-side-panel-cash .cash-balance-card {
+  padding: 0.22rem 0.75rem 0.24rem;
+}
+
+.home-side-panel-cash .cash-balance-card strong {
+  font-size: clamp(1.45rem, 2.1vw, 1.95rem);
 }
 
 .cash-balance-card-admin {
@@ -3205,6 +3358,18 @@ body {
   margin-top: 0.7rem;
   padding-top: 0.55rem;
   border-top: 1px solid rgba(31, 109, 95, 0.1);
+}
+
+.home-stock-action-btn {
+  background: linear-gradient(145deg, #c95d2a, #a84218);
+  border-color: #993912;
+  color: #ffffff;
+}
+
+.home-stock-action-btn:hover,
+.home-stock-action-btn:focus-visible {
+  background: linear-gradient(145deg, #d66a34, #b1471b);
+  border-color: #8a3310;
 }
 
 .analysis-hero {
@@ -4148,8 +4313,8 @@ body.route-analisis {
   display: grid;
   gap: 0.6rem;
   min-height: 0;
-  align-content: start;
-  align-items: start;
+  align-content: stretch;
+  align-items: stretch;
 }
 
 .shopping-filter-form {
@@ -4170,7 +4335,12 @@ body.route-analisis {
   display: grid;
   gap: 0.45rem;
   align-content: start;
-  align-self: start;
+  align-self: stretch;
+}
+
+.shopping-dialog-selected-list {
+  min-height: 0;
+  height: 100%;
 }
 
 .shopping-row,
@@ -4433,8 +4603,12 @@ body.route-analisis {
     grid-template-rows: auto minmax(18.5rem, 1.4fr) minmax(13rem, 0.84fr);
   }
 
-  .home-side-panels-single {
-    grid-template-rows: auto auto;
+  .home-side-panels-admin {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .home-side-panels-stock-only {
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .shopping-dialog-list {
@@ -4443,7 +4617,11 @@ body.route-analisis {
 
   .home-menu-card {
     aspect-ratio: auto;
-    min-height: 7.2rem;
+    min-height: 10.8rem;
+  }
+
+  .home-action-grid-operativa-admin .home-menu-card-sales {
+    min-height: 21.6rem;
   }
 }
 
@@ -4748,6 +4926,12 @@ body.route-analisis {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.emoji-picker-trigger > *,
+.emoji-picker-value > *,
+.emoji-option > * {
+  pointer-events: none;
 }
 
 .emoji-picker-menu {
@@ -5238,6 +5422,50 @@ body.route-analisis {
   background-color: rgba(255, 255, 255, 0.92) !important;
 }
 
+.home-menu-card {
+  background-color: transparent !important;
+}
+
+.home-menu-card-sales {
+  background: #db9648 !important;
+}
+
+.home-menu-card-purchases {
+  background: #e7aa61 !important;
+}
+
+.home-menu-card-expenses {
+  background: #f2bd79 !important;
+}
+
+.home-menu-card-inventory {
+  background: #f9cf9b !important;
+}
+
+.home-menu-card-history-sales {
+  background: #6faee2 !important;
+}
+
+.home-menu-card-history-purchases {
+  background: #8fc3f1 !important;
+}
+
+.home-menu-card-history-expenses {
+  background: #b9dcff !important;
+}
+
+.home-menu-card-user {
+  background: #dbeeff !important;
+}
+
+.home-menu-card-settings {
+  background: #d3d3d3 !important;
+}
+
+.home-menu-card-analytics {
+  background: #ededed !important;
+}
+
 .analysis-total-row td {
   background-color: rgba(244, 248, 246, 0.98) !important;
 }
@@ -5352,8 +5580,12 @@ body.route-analisis {
     grid-template-rows: auto minmax(0, 1.18fr) minmax(0, 0.8fr);
   }
 
-  .route-home .home-side-panels-single {
-    grid-template-rows: auto auto;
+  .route-home .home-side-panels-admin {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .route-home .home-side-panels-stock-only {
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .route-inventario .inv-grid {
@@ -5478,6 +5710,8 @@ body.route-analisis {
 
   .home-menu-emoji {
     font-size: 1.1rem;
+    width: 2.2rem;
+    height: 2.2rem;
   }
 
   .home-clean-layout,
@@ -5501,8 +5735,12 @@ body.route-analisis {
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .route-home .home-side-panels-single {
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1.3fr);
+  .route-home .home-side-panels-admin {
+    grid-template-rows: auto minmax(0, 1.3fr);
+  }
+
+  .route-home .home-side-panels-stock-only {
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .route-home .home-clean-layout {
@@ -5525,13 +5763,25 @@ body.route-analisis {
   }
 
   .route-home .home-menu-card {
-    min-height: 5.5rem;
+    min-height: 11rem;
     aspect-ratio: auto;
     gap: 0.35rem;
   }
 
+  .route-home .home-clean-layout-admin .home-menu-card {
+    min-height: 8.25rem;
+  }
+
+  .route-home .home-clean-layout-admin .home-action-grid-operativa-admin .home-menu-card-sales {
+    min-height: 16.5rem;
+  }
+
+  .route-home .home-clean-layout-user .home-action-grid:not(.home-action-grid-operativa-admin) .home-menu-card {
+    min-height: 11rem;
+  }
+
   .route-home .home-menu-card h2 {
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     max-width: none;
   }
 

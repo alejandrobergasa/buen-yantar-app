@@ -35,7 +35,7 @@
     </div>
     <div class="actions">
       <button class="btn btn-primary" type="submit">Filtrar</button>
-      <a class="btn btn-secondary" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
+      <a class="btn btn-accent" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="{{ url_for('supervision') }}">Limpiar</a>
     </div>
   </form>

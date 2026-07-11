@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#1f4b44">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='home_menu_palette.css', v=palette_css_mtime) }}">
   <script>
     window.BYEmoji = (() => {
       const assets = {{ emoji_assets_json|safe }};
@@ -165,20 +166,12 @@
     });
 
     (() => {
-      const params = new URLSearchParams(window.location.search || "");
-      if (params.get("launcher") === "1") {
-        sessionStorage.setItem("buen-yantar:launched-by-launcher", "1");
-      }
-
       const exitButton = document.getElementById("exitAppButton");
       if (!exitButton) return;
-      const launchedByLauncher = () => sessionStorage.getItem("buen-yantar:launched-by-launcher") === "1";
+      const launchedByLauncher = {{ "true" if session.get("launched_by_launcher") == "1" else "false" }};
 
       exitButton.addEventListener("click", async () => {
-        const confirmed = window.confirm("¿Quieres cerrar Buen Yantar?");
-        if (!confirmed) return;
-
-        if (!launchedByLauncher()) {
+        if (!launchedByLauncher) {
           window.alert("Esta ventana no fue abierta por el lanzador. Puedes cerrar la pestaña manualmente.");
           return;
         }

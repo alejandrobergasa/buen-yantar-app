@@ -60,6 +60,7 @@
   const invoiceConfirmTotal = document.getElementById("invoiceConfirmTotal");
   const selectedById = new Map();
   const draftKey = "buen-yantar:invoice-draft:low:v1";
+  const defaultInvoiceProduct = {{ default_invoice_product|tojson }};
   let invoiceConfirmAccepted = false;
   let invoiceFetchToken = 0;
 
@@ -289,6 +290,12 @@
       qtyInput.focus();
       qtyInput.select();
     }
+  }
+
+  function ensureDefaultInvoiceProduct() {
+    if (!defaultInvoiceProduct || !defaultInvoiceProduct.pid) return;
+    if (selectedById.has(defaultInvoiceProduct.pid)) return;
+    appendInvoiceRow(defaultInvoiceProduct, { focus: false });
   }
 
   function addProductToInvoice(sourceRow) {
@@ -613,6 +620,7 @@
   if (!invoiceFiltersForm) {
     applyProductFilters();
   }
+  ensureDefaultInvoiceProduct();
   refreshEmptyState();
   refreshSummary();
 </script>

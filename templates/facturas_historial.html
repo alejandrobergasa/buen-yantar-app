@@ -22,7 +22,7 @@
     <div class="actions actions-end">
         <button class="btn btn-primary" type="submit">Filtrar</button>
         {% if g.is_admin %}
-        <a class="btn btn-secondary" href="{{ url_for('export_historial_facturas', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
+        <a class="btn btn-accent" href="{{ url_for('export_historial_facturas', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
         {% endif %}
         <a class="btn btn-secondary" href="{{ url_for('historial_facturas') }}">Limpiar</a>
     </div>
@@ -77,7 +77,7 @@
                     <input type="hidden" name="q" value="{{ current_q }}">
                     <input type="hidden" name="from" value="{{ current_from }}">
                     <input type="hidden" name="to" value="{{ current_to }}">
-                    <button class="btn btn-secondary btn-small" type="submit">Ticket</button>
+                    <button class="btn btn-accent btn-small" type="submit">Ticket</button>
                   </form>
                   <form method="post" action="{{ url_for('eliminar_factura', factura_id=fid) }}" data-delete-entry-form data-entry-label="la factura {{ fid }}">
                     <input type="hidden" name="q" value="{{ current_q }}">

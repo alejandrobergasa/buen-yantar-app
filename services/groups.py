@@ -12,7 +12,7 @@ GROUP_HEADERS = ["group_id", "nombre", "emoji", "activo"]
 
 
 def _normalize_group_name(raw: object) -> str:
-    return str(raw or "").strip() or "Otros"
+    return str(raw or "").strip()
 
 
 def _normalize_group_emoji(raw: object) -> str:
@@ -33,7 +33,7 @@ def ensure_group_catalog(
     existing_by_name = {
         _normalize_group_name(row.get("nombre")).lower(): row
         for row in rows
-        if (row.get("activo") or "1").strip() != "0"
+        if (row.get("activo") or "1").strip() != "0" and _normalize_group_name(row.get("nombre"))
     }
 
     for row in rows:
@@ -52,6 +52,8 @@ def ensure_group_catalog(
     source_products = products if products is not None else (read_all(products_csv) if products_csv is not None else [])
     for product in source_products:
         group_name = _normalize_group_name(product.get("grupo"))
+        if not group_name:
+            continue
         group_key = group_name.lower()
         if group_key in existing_by_name:
             continue
@@ -65,15 +67,6 @@ def ensure_group_catalog(
         existing_by_name[group_key] = group_row
         changed = True
 
-    if not rows:
-        rows.append({
-            "group_id": short_id(),
-            "nombre": "Otros",
-            "emoji": "package",
-            "activo": "1",
-        })
-        changed = True
-
     if changed:
         write_all_atomic(groups_csv, rows, GROUP_HEADERS, backup_dir=backup_dir)
 
@@ -81,7 +74,7 @@ def ensure_group_catalog(
 def list_groups(groups_csv: Path) -> List[Dict[str, str]]:
     rows = [
         row for row in read_all(groups_csv)
-        if (row.get("activo") or "1").strip() != "0"
+        if (row.get("activo") or "1").strip() != "0" and _normalize_group_name(row.get("nombre"))
     ]
     rows.sort(key=lambda row: _normalize_group_name(row.get("nombre")).lower())
     return rows
@@ -89,6 +82,8 @@ def list_groups(groups_csv: Path) -> List[Dict[str, str]]:
 
 def find_group_by_name(groups_csv: Path, group_name: str) -> Optional[Dict[str, str]]:
     target = _normalize_group_name(group_name).lower()
+    if not target:
+        return None
     for row in list_groups(groups_csv):
         if _normalize_group_name(row.get("nombre")).lower() == target:
             return row
@@ -107,6 +102,8 @@ def find_group_by_id(groups_csv: Path, group_id: str) -> Optional[Dict[str, str]
 
 def create_group(groups_csv: Path, *, group_name: str, emoji: str, backup_dir: Optional[Path] = None) -> Dict[str, str]:
     name = _normalize_group_name(group_name)
+    if not name:
+        raise ValueError("El nombre del grupo es obligatorio.")
     emoji_clean = _normalize_group_emoji(emoji)
     rows = read_all(groups_csv)
 
@@ -142,6 +139,8 @@ def update_group(
         return None
 
     name = _normalize_group_name(group_name)
+    if not name:
+        return None
     emoji_clean = _normalize_group_emoji(emoji)
     rows = read_all(groups_csv)
 
@@ -167,6 +166,8 @@ def update_group(
 
 def delete_group(groups_csv: Path, *, group_name: str, backup_dir: Optional[Path] = None) -> bool:
     target = _normalize_group_name(group_name).lower()
+    if not target:
+        return False
     rows = read_all(groups_csv)
     changed = False
     for row in rows:

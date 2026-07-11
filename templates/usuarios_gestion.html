@@ -103,7 +103,7 @@
               {% else %}
                 <form method="post" action="{{ url_for('eliminar_usuario') }}" onsubmit="return confirm('¿Eliminar este usuario?')">
                   <input type="hidden" name="username" value="{{ u.username }}">
-                  <button class="btn btn-secondary btn-small" type="submit">Eliminar</button>
+                  <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
                 </form>
               {% endif %}
             </td>

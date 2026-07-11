@@ -21,7 +21,7 @@
     </div>
     <div class="actions actions-end">
       <button class="btn btn-primary" type="submit">Filtrar</button>
-      <a class="btn btn-secondary" href="{{ url_for('export_historial_gastos_libres', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
+      <a class="btn btn-accent" href="{{ url_for('export_historial_gastos_libres', q=current_q, from=current_from, to=current_to) }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="{{ url_for('historial_gastos_libres') }}">Limpiar</a>
     </div>
   </form>

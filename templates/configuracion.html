@@ -185,7 +185,7 @@
             {% else %}
             <form method="post" action="{{ url_for('eliminar_usuario') }}" onsubmit="return confirm('¿Eliminar este usuario?')">
               <input type="hidden" name="username" value="{{ u.username }}">
-              <button class="btn btn-secondary btn-small" type="submit">Eliminar</button>
+              <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
             </form>
             {% endif %}
           </td>
@@ -231,7 +231,7 @@
     </div>
     <div class="actions">
       <button class="btn btn-primary" type="submit">Filtrar</button>
-      <a class="btn btn-secondary" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
+      <a class="btn btn-accent" href="{{ url_for('export_supervision', q=current_q, user=current_user, from=current_from, to=current_to) }}">Exportar CSV</a>
       <a class="btn btn-secondary" href="{{ url_for('configuracion_logs') }}">Limpiar</a>
     </div>
   </form>
@@ -417,18 +417,17 @@
                     <div class="emoji-picker-scroll" data-emoji-scroll></div>
                   </div>
                 </div>
-                <button class="btn btn-secondary btn-small" type="submit">Guardar</button>
+                <button class="btn btn-primary btn-small" type="submit">Guardar</button>
               </div>
             </form>
           </td>
           <td>
-            {% if group.product_count == 0 %}
-            <form method="post" action="{{ url_for('eliminar_grupo_config') }}" onsubmit="return confirm('¿Eliminar este grupo vacío?')">
+            <form method="post" action="{{ url_for('eliminar_grupo_config') }}" onsubmit="return confirm('¿Eliminar este grupo? Los productos asignados quedarán sin grupo.')">
               <input type="hidden" name="grupo" value="{{ group.nombre }}">
-              <button class="btn btn-secondary btn-small" type="submit">Eliminar</button>
+              <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
             </form>
-            {% else %}
-            <span class="help">Reasigna sus productos antes de eliminarlo</span>
+            {% if group.product_count > 0 %}
+            <span class="help">Si lo eliminas, sus productos quedarán sin grupo.</span>
             {% endif %}
           </td>
         </tr>

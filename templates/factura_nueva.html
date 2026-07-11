@@ -301,6 +301,7 @@
   const selectedById = new Map();
   const draftKey = "buen-yantar:invoice-draft:v1";
   const toastKey = "buen-yantar:toast";
+  const defaultInvoiceProduct = {{ default_invoice_product|tojson }};
   let invoiceSubmitting = false;
   const scheduleDraftSave = debounce(saveDraft, 300);
   const scheduleProductFilter = debounce(() => {
@@ -446,6 +447,12 @@
       sessionStorage.removeItem(draftKey);
       updateDraftStatus("empty", "Borrador vacio");
     }
+  }
+
+  function ensureDefaultInvoiceProduct() {
+    if (!defaultInvoiceProduct || !defaultInvoiceProduct.pid) return;
+    if (selectedById.has(defaultInvoiceProduct.pid)) return;
+    appendInvoiceRow(defaultInvoiceProduct, { focus: false });
   }
 
   function syncSelectedState() {
@@ -753,6 +760,7 @@
   });
 
   restoreDraft();
+  ensureDefaultInvoiceProduct();
   applyProductFilters();
   syncFilterState();
   refreshEmptyState();

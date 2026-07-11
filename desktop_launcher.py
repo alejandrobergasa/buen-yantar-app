@@ -26,6 +26,13 @@ def env_with_defaults() -> dict[str, str]:
     return env
 
 
+def launcher_browser_profile_dir() -> Path:
+    override = os.getenv("BROWSER_PROFILE_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return ROOT_DIR / "data" / "launcher_browser_profile"
+
+
 def wait_for_server(host: str, port: int, timeout: float = 20.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -146,6 +153,19 @@ def maximize_browser_window(process: subprocess.Popen[str], timeout: float = 8.0
 def stop_process(process: subprocess.Popen[str], timeout: float = 8.0) -> None:
     if process.poll() is not None:
         return
+
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=max(1.0, min(timeout, 5.0)),
+            )
+        except Exception:
+            pass
+
     process.terminate()
     try:
         process.wait(timeout=timeout)
@@ -160,7 +180,7 @@ def main() -> int:
     port = int(env["PORT"])
     url = launcher_target_url(f"http://{host}:{port}")
     launcher_dir = Path(tempfile.mkdtemp(prefix="buen_yantar_launcher_"))
-    browser_profile_dir = launcher_dir / "browser_profile"
+    browser_profile_dir = launcher_browser_profile_dir()
     browser_profile_dir.mkdir(parents=True, exist_ok=True)
     exit_signal_path = launcher_dir / "close.signal"
     env["LAUNCHER_EXIT_SIGNAL"] = str(exit_signal_path)

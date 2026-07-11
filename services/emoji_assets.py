@@ -19,6 +19,7 @@ EMOJI_ASSETS: Dict[str, Dict[str, object]] = {
     "chart": {"char": "📈", "label": "Análisis", "file": "chart.svg", "aliases": [], "category": "system"},
     "infinity": {"char": "♾️", "label": "Infinito", "file": "infinity.svg", "aliases": ["♾"], "category": "system"},
     "warning": {"char": "🟡", "label": "Aviso", "file": "warning.svg", "aliases": [], "category": "system"},
+    "question": {"char": "❓", "label": "Sin grupo", "file": "question.svg", "aliases": ["?"], "category": "system"},
     "check": {"char": "✅", "label": "Correcto", "file": "check.svg", "aliases": [], "category": "system"},
     "trash": {"char": "🗑️", "label": "Eliminar", "file": "trash.svg", "aliases": ["🗑"], "category": "system"},
     "save": {"char": "💾", "label": "Guardar", "file": "save.svg", "aliases": [], "category": "system"},
