@@ -2869,6 +2869,16 @@ body {
   box-shadow: 0 16px 26px rgba(23, 32, 38, 0.12);
 }
 
+.home-menu-card-disabled,
+.home-menu-card-disabled:hover,
+.home-menu-card-disabled:focus-visible {
+  cursor: default;
+  opacity: 0.34;
+  transform: none;
+  box-shadow: var(--shadow-soft);
+  filter: saturate(0.55);
+}
+
 .home-menu-card-sales {
   background: #db9648;
   border-color: #bc782e;
@@ -3812,6 +3822,12 @@ body.route-analisis {
 .route-analisis .page-stack > * {
   flex: 0 0 auto;
   min-height: 0;
+}
+
+.route-analisis .page-stack > .analysis-page-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .route-analisis .stats-grid {
@@ -5772,13 +5788,18 @@ body.route-analisis {
     min-height: 8.25rem;
   }
 
+  .route-home .home-clean-layout-user .home-menu-card {
+    min-height: 8.25rem;
+  }
+
   .route-home .home-clean-layout-admin .home-action-grid-operativa-admin .home-menu-card-sales {
     min-height: 16.5rem;
   }
 
-  .route-home .home-clean-layout-user .home-action-grid:not(.home-action-grid-operativa-admin) .home-menu-card {
-    min-height: 11rem;
+  .route-home .home-clean-layout-user .home-action-grid-operativa-admin .home-menu-card-sales {
+    min-height: 16.5rem;
   }
+
 
   .route-home .home-menu-card h2 {
     font-size: 1.05rem;

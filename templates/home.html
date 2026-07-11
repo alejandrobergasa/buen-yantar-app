@@ -11,7 +11,7 @@
     <div class="home-action-groups">
       <div class="home-action-group">
         <h3 class="home-group-title">Operativa</h3>
-        <div class="action-grid home-action-grid {% if g.is_admin %}home-action-grid-operativa-admin{% endif %}">
+        <div class="action-grid home-action-grid home-action-grid-operativa-admin">
           <a class="action-card action-card-primary home-menu-card home-menu-card-sales" href="{{ url_for('nueva_factura') }}">
             {{ emoji_icon("receipt", alt="Nueva factura", class_name="home-menu-emoji") }}
             <h2>Nueva factura</h2>
@@ -22,11 +22,23 @@
             {{ emoji_icon("cart", alt="Nueva compra", class_name="home-menu-emoji") }}
             <h2>Nueva compra</h2>
           </a>
+          {% else %}
+          <span class="action-card action-card-primary home-menu-card home-menu-card-purchases home-menu-card-disabled" aria-disabled="true">
+            {{ emoji_icon("cart", alt="Nueva compra no disponible", class_name="home-menu-emoji") }}
+            <h2>Nueva compra</h2>
+          </span>
+          {% endif %}
 
+          {% if g.is_admin %}
           <a class="action-card action-card-primary home-menu-card home-menu-card-expenses" href="{{ url_for('nuevo_gasto_libre') }}">
             {{ emoji_icon("cash", alt="Gasto libre", class_name="home-menu-emoji") }}
             <h2>Gasto libre</h2>
           </a>
+          {% else %}
+          <span class="action-card action-card-primary home-menu-card home-menu-card-expenses home-menu-card-disabled" aria-disabled="true">
+            {{ emoji_icon("cash", alt="Gasto libre no disponible", class_name="home-menu-emoji") }}
+            <h2>Gasto libre</h2>
+          </span>
           {% endif %}
 
           <a class="action-card action-card-primary home-menu-card home-menu-card-inventory" href="{{ url_for('inventario') }}">
@@ -49,38 +61,48 @@
             {{ emoji_icon("bags", alt="Historial compras", class_name="home-menu-emoji") }}
             <h2>Historial Compras</h2>
           </a>
+          {% else %}
+          <span class="action-card action-card-short home-menu-card home-menu-card-history-purchases home-menu-card-disabled" aria-disabled="true">
+            {{ emoji_icon("bags", alt="Historial compras no disponible", class_name="home-menu-emoji") }}
+            <h2>Historial Compras</h2>
+          </span>
+          {% endif %}
 
+          {% if g.is_admin %}
           <a class="action-card action-card-short home-menu-card home-menu-card-history-expenses" href="{{ url_for('historial_gastos_libres') }}">
             {{ emoji_icon("card", alt="Historial gastos", class_name="home-menu-emoji") }}
             <h2>Historial Gastos</h2>
           </a>
-          {% endif %}
-
-          {% if not g.is_admin %}
-          <a class="action-card action-card-short home-menu-card home-menu-card-user" href="{{ url_for('gestion_usuarios') }}">
-            {{ emoji_icon("user", alt="Usuario", class_name="home-menu-emoji") }}
-            <h2>Usuario</h2>
-          </a>
+          {% else %}
+          <span class="action-card action-card-short home-menu-card home-menu-card-history-expenses home-menu-card-disabled" aria-disabled="true">
+            {{ emoji_icon("card", alt="Historial gastos no disponible", class_name="home-menu-emoji") }}
+            <h2>Historial Gastos</h2>
+          </span>
           {% endif %}
         </div>
       </div>
 
-      {% if g.is_admin %}
       <div class="home-action-group">
         <h3 class="home-group-title">Administracion</h3>
         <div class="action-grid home-action-grid home-action-grid-admin">
-          <a class="action-card action-card-short home-menu-card home-menu-card-settings" href="{{ url_for('configuracion_caja') }}">
+          <a class="action-card action-card-short home-menu-card home-menu-card-settings" href="{{ url_for('configuracion_caja' if g.is_admin else 'gestion_usuarios') }}">
             {{ emoji_icon("settings", alt="Configuración", class_name="home-menu-emoji") }}
             <h2>Configuracion</h2>
           </a>
 
+          {% if g.is_admin %}
           <a class="action-card action-card-short home-menu-card home-menu-card-analytics" href="{{ url_for('analisis') }}">
             {{ emoji_icon("chart", alt="Análisis", class_name="home-menu-emoji") }}
             <h2>Analisis</h2>
           </a>
+          {% else %}
+          <span class="action-card action-card-short home-menu-card home-menu-card-analytics home-menu-card-disabled" aria-disabled="true">
+            {{ emoji_icon("chart", alt="Análisis no disponible", class_name="home-menu-emoji") }}
+            <h2>Analisis</h2>
+          </span>
+          {% endif %}
         </div>
       </div>
-      {% endif %}
     </div>
   </section>
 
