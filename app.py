@@ -3378,7 +3378,7 @@ def create_app() -> Flask:
 
     @app.post("/facturas/<factura_id>/imprimir")
     def imprimir_factura(factura_id: str):
-        r = require_admin()
+        r = require_login()
         if r:
             return r
 
@@ -3388,6 +3388,13 @@ def create_app() -> Flask:
         if not invoice:
             flash("Factura no encontrada.")
             return redirect(url_for("historial_facturas", **redirect_params))
+
+        if not user_is_admin():
+            me = (session.get("user") or "").strip().lower()
+            invoice_user = (invoice.get("usuario") or "").strip().lower()
+            if invoice_user != me:
+                flash("Factura no encontrada.")
+                return redirect(url_for("historial_facturas", **redirect_params))
 
         try:
             print_invoice_ticket(factura_id)

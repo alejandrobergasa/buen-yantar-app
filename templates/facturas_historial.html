@@ -49,9 +49,7 @@
             <th>Usuario</th>
             <th class="right">Lineas</th>
             <th class="right">Total</th>
-            {% if g.is_admin %}
             <th>Acciones</th>
-            {% endif %}
             <th>Detalle</th>
           </tr>
         </thead>
@@ -70,7 +68,6 @@
               <td>{{ inv.usuario or "-" }}</td>
               <td class="right">{{ inv.lineas or "0" }}</td>
               <td class="right">{{ inv.total_importe or "0.00" }} €</td>
-              {% if g.is_admin %}
               <td>
                 <div class="actions">
                   <form method="post" action="{{ url_for('imprimir_factura', factura_id=fid) }}">
@@ -79,6 +76,7 @@
                     <input type="hidden" name="to" value="{{ current_to }}">
                     <button class="btn btn-accent btn-small" type="submit">Ticket</button>
                   </form>
+                  {% if g.is_admin %}
                   <form method="post" action="{{ url_for('eliminar_factura', factura_id=fid) }}" data-delete-entry-form data-entry-label="la factura {{ fid }}">
                     <input type="hidden" name="q" value="{{ current_q }}">
                     <input type="hidden" name="from" value="{{ current_from }}">
@@ -86,9 +84,9 @@
                     <input type="hidden" name="update_cash" value="0" data-update-cash-input>
                     <button class="btn btn-danger btn-small" type="submit">Eliminar</button>
                   </form>
+                  {% endif %}
                 </div>
               </td>
-              {% endif %}
               <td>
                 <details>
                   <summary>Ver lineas</summary>
